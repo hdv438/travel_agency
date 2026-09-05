@@ -642,48 +642,6 @@ def extract_visa_fields(text):
 	return {k: v for k, v in data.items() if v is not None}
 
 
-def extract_injaz_fields(text):
-	"""Extracts fields from Embassy of Saudi Arabia Injaz document."""
-	if not text:
-		return {}
-
-	# Clean lines
-	lines = [l.strip() for l in text.splitlines() if l.strip()]
-
-	pass_no = _search(r"Pas+port\s*No\s*[:=\-–]?\s*([A-Z]{1,2}\d{6,9})", text)
-	app_no = _search(r"(?:Application\s*No|Injaz\s*No|رقم\s*الطلب)\s*[:=\-–]?\s*(\d+)", text)
-
-	if not app_no:
-		for l in lines[:10]:
-			if re.match(r'^\d{10}$', l):
-				app_no = l
-				break
-
-	if not pass_no:
-		for l in lines[:10]:
-			if re.match(r'^[A-Z]{1,2}\d{7,9}$', l) and l != app_no:
-				pass_no = l
-				break
-
-	data = {
-		"injaz_number": app_no,
-		"passport_number": pass_no,
-		"sponsor_name": _search(r"Sponsor\s*[:=\-–]?\s*([A-Za-z\s]+?)\s*\n", text),
-		"origin_agency": _search(r"([A-Za-z\s]+?EMPLOYMENT\s+AGENT)", text),
-		"full_name": _search(r"Full\s*Name\s*[:=\-–]?\s*([A-Za-z\s]+?)\s*\n", text),
-		"date_of_birth": normalize_date_string(_search(r"Date\s*of\s*Birth\s*[:=\-–]?\s*([0-9\-/.]+)", text)),
-		"place_of_birth": _search(r"Place\s*of\s*Birth\s*[:=\-–]?\s*([A-Za-z\s]+?)\s*\n", text),
-		"nationality": _search(r"Current\s*Nationality\s*[:=\-–]?\s*([A-Za-z\s]+?)\s*\n", text) or "Ethiopia",
-		"gender": "Female" if _search(r"Sex\s*[:=\-–]?\s*(Female|F)", text) else ("Male" if _search(r"Sex\s*[:=\-–]?\s*(Male|M)", text) else None),
-		"religion": _search(r"Religion\s*[:=\-–]?\s*([A-Za-z\s]+?)\s*\n", text),
-		"profession": _search(r"Profession\s*[:=\-–]?\s*([A-Za-z\s]+?)\s*\n", text),
-		"passport_issue_date": normalize_date_string(_search(r"Date\s*of\s*Issue\s*[:=\-–]?\s*([0-9\-/.]+)", text)),
-		"passport_expiry_date": normalize_date_string(_search(r"Date\s*of\s*Expiry\s*[:=\-–]?\s*([0-9\-/.]+)", text)),
-		"passport_issue_place": _search(r"Place\s*of\s*Issue\s*[:=\-–]?\s*([A-Za-z\s]+?)\s*\n", text),
-	}
-	return {k: v for k, v in data.items() if v is not None}
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Master Parse Handlers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -745,12 +703,3 @@ def parse_visa_file(file_url):
 	file_path = _resolve_frappe_file_path(file_url)
 	text = extract_text_from_pdf(file_path) if file_path else ""
 	return {k: v for k, v in extract_visa_fields(text).items() if v is not None}
-
-
-@frappe.whitelist()
-def parse_injaz_file(file_url):
-	"""Injaz paper parser for Saudi clearance step automation."""
-	file_path = _resolve_frappe_file_path(file_url)
-	text = extract_text_from_pdf(file_path) if file_path else ""
-	return {k: v for k, v in extract_injaz_fields(text).items() if v is not None}
-

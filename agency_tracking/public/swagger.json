@@ -2303,54 +2303,6 @@
         ]
       }
     },
-    "/api/method/agency_tracking.contract_parser.parse_injaz_file": {
-      "post": {
-        "tags": [
-          "Document Parsing"
-        ],
-        "summary": "Extract fields from a Saudi Injaz paper",
-        "description": "Injaz application number, passport number, applicant demographics, origin agency.",
-        "x-roles": [
-          "Any authenticated user"
-        ],
-        "consumes": [
-          "application/x-www-form-urlencoded",
-          "application/json"
-        ],
-        "parameters": [
-          {
-            "name": "file_url",
-            "in": "formData",
-            "type": "string",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "message": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Not permitted (role/permission check failed)"
-          },
-          "417": {
-            "description": "Validation error (business rule violated)"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
     "/api/method/agency_tracking.contract_parser.parse_visa_file": {
       "post": {
         "tags": [

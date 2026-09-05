@@ -16,10 +16,6 @@ frappe.ui.form.on('Applicant', {
 			}, __('Actions'));
 		}
 
-		frm.add_custom_button(__('Parse Injaz Paper'), () => {
-			frm.trigger('parse_injaz_dialog');
-		}, __('Actions'));
-
 		// --- 2. Registration & Lifecycle Actions ---
 		if (frm.doc.status === 'Draft') {
 			frm.add_custom_button(__('Register Applicant'), () => {
@@ -136,36 +132,6 @@ frappe.ui.form.on('Applicant', {
 				} else {
 					frappe.msgprint(__('Could not extract MRZ data from the uploaded scan.'));
 				}
-			},
-		});
-	},
-
-	parse_injaz_dialog(frm) {
-		new frappe.ui.FileUploader({
-			as_dataurl: false,
-			allow_multiple: false,
-			on_success(file_doc) {
-				frappe.call({
-					method: 'agency_tracking.contract_parser.parse_injaz_file',
-					args: { file_url: file_doc.file_url },
-					freeze: true,
-					freeze_message: __('Parsing Injaz document...'),
-					callback(r) {
-						if (r.message && Object.keys(r.message).length > 0) {
-							$.each(r.message, (field, val) => {
-								if (val && !frm.doc[field]) {
-									frm.set_value(field, val);
-								}
-							});
-							frappe.show_alert({
-								message: __('Injaz data extracted and populated!'),
-								indicator: 'green',
-							});
-						} else {
-							frappe.msgprint(__('No data extracted from Injaz document.'));
-						}
-					},
-				});
 			},
 		});
 	},
