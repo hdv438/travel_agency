@@ -1,0 +1,79 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-29 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "mode",
+  "fetch_interval",
+  "last_fetched_at"
+ ],
+ "fields": [
+  {
+   "default": "Custom",
+   "description": "Global: rates auto-fetched from a free rate API on the interval below. Custom: Finance Manager/Admin set rates manually via set_fx_rate.",
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "label": "Mode",
+   "options": "Global\nCustom"
+  },
+  {
+   "default": "Daily",
+   "depends_on": "eval:doc.mode == 'Global'",
+   "fieldname": "fetch_interval",
+   "fieldtype": "Select",
+   "label": "Fetch Interval",
+   "options": "1 Hour\n3 Hours\n6 Hours\nDaily"
+  },
+  {
+   "fieldname": "last_fetched_at",
+   "fieldtype": "Datetime",
+   "label": "Last Fetched At",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "FX Rate Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

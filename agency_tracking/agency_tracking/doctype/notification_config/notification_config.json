@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "push_sec",
+  "vapid_public_key",
+  "vapid_private_key",
+  "vapid_claims_email",
+  "whatsapp_sec",
+  "whatsapp_access_token",
+  "whatsapp_phone_number_id",
+  "watchdog_sec",
+  "contract_age_threshold_days"
+ ],
+ "fields": [
+  {
+   "fieldname": "push_sec",
+   "fieldtype": "Section Break",
+   "label": "Web Push (VAPID)"
+  },
+  {
+   "fieldname": "vapid_public_key",
+   "fieldtype": "Data",
+   "label": "VAPID Public Key"
+  },
+  {
+   "fieldname": "vapid_private_key",
+   "fieldtype": "Password",
+   "label": "VAPID Private Key"
+  },
+  {
+   "fieldname": "vapid_claims_email",
+   "fieldtype": "Data",
+   "label": "VAPID Claims Email"
+  },
+  {
+   "fieldname": "whatsapp_sec",
+   "fieldtype": "Section Break",
+   "label": "WhatsApp Cloud API"
+  },
+  {
+   "fieldname": "whatsapp_access_token",
+   "fieldtype": "Password",
+   "label": "Access Token"
+  },
+  {
+   "fieldname": "whatsapp_phone_number_id",
+   "fieldtype": "Data",
+   "label": "Phone Number ID"
+  },
+  {
+   "fieldname": "watchdog_sec",
+   "fieldtype": "Section Break",
+   "label": "Watchdogs"
+  },
+  {
+   "default": "30",
+   "description": "Part A.4: \"admin sets a day threshold; exceeding it without departure or cancellation raises an alert.\" Measured from Placement.contract_signed_date.",
+   "fieldname": "contract_age_threshold_days",
+   "fieldtype": "Int",
+   "label": "Contract Age Alert Threshold (Days)"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Notification Config",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

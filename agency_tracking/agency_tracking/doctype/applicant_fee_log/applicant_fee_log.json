@@ -1,0 +1,89 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-29 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "description",
+  "transaction_type",
+  "amount",
+  "currency",
+  "col_break_afl",
+  "status",
+  "transaction",
+  "receipt_url"
+ ],
+ "fields": [
+  {
+   "fieldname": "description",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "transaction_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Type",
+   "options": "Income\nExpense",
+   "reqd": 1
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "reqd": 1
+  },
+  {
+   "default": "ETB",
+   "fieldname": "currency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Currency",
+   "options": "ETB\nSAR\nKWD\nUSD\nAED\nQAR"
+  },
+  {
+   "fieldname": "col_break_afl",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Not Logged",
+   "description": "Mirrors the linked Applicant Transaction's status -- refreshed automatically on every Applicant save. Not Logged means the row hasn't been submitted to Finance yet (still blank amount/description or newly added this save).",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Not Logged\nPending\nApproved\nRejected\nVoided",
+   "read_only": 1
+  },
+  {
+   "description": "Set automatically once this row has been logged into the Finance ledger -- read-only, links to the actual Applicant Transaction row for approval.",
+   "fieldname": "transaction",
+   "fieldtype": "Link",
+   "label": "Ledger Entry",
+   "options": "Applicant Transaction",
+   "read_only": 1
+  },
+  {
+   "description": "Upload here -- automatically moved to Cloudflare R2 on save.",
+   "fieldname": "receipt_url",
+   "fieldtype": "Attach",
+   "label": "Receipt"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Applicant Fee Log",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": []
+}

@@ -1,0 +1,349 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "CLR-.#####",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "placement",
+  "step_type",
+  "sequence_order",
+  "is_mandatory",
+  "col_break_clearance",
+  "status",
+  "date_started",
+  "date_completed",
+  "completed_by",
+  "payment_sec",
+  "reference_no",
+  "amount",
+  "payment_status",
+  "taeshir_sec",
+  "injaz_attempts",
+  "embassy_sec",
+  "rejection_remark",
+  "col_break_embassy",
+  "wakala_amount",
+  "wakala_status",
+  "wakala_paid_date",
+  "police_ashara_sec",
+  "police_ashara_appointment_date",
+  "police_ashara_status",
+  "police_ashara_remark",
+  "col_break_police_ashara",
+  "police_ashara_amount",
+  "police_ashara_payment_status",
+  "payments_sec",
+  "payments"
+ ],
+ "fields": [
+  {
+   "fieldname": "placement",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Placement",
+   "options": "Placement",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Matches Corridor Step.step_type — set once at creation from the destination's Corridor Definition, never edited directly (Part A.3: corridors are data, steps are generated from them).",
+   "fieldname": "step_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Step Type",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "sequence_order",
+   "fieldtype": "Int",
+   "label": "Sequence Order",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "is_mandatory",
+   "fieldtype": "Check",
+   "label": "Mandatory",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_clearance",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Pending",
+   "description": "Shared across every step_type, but the actual vocabulary in use differs by step: LMIS (Saudi + Kuwait) completes to 'Issued'; Embassy (Saudi + Kuwait) uses Pending -> Submitted -> Stamped/Rejected; Taeshir and Telesign use the generic Pending -> Complete. Cancelled applies everywhere (Applicant/Placement cancellation cascade).",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nIn Progress\nSubmitted\nComplete\nIssued\nStamped\nRejected\nCancelled"
+  },
+  {
+   "fieldname": "date_started",
+   "fieldtype": "Date",
+   "label": "Date Started"
+  },
+  {
+   "fieldname": "date_completed",
+   "fieldtype": "Date",
+   "label": "Date Completed"
+  },
+  {
+   "description": "Step 13: needed for per-staff performance reporting (\"the same breakdown per individual staff member\") — not captured anywhere else, since the ToDo that tracked assignment is closed by the time the step completes.",
+   "fieldname": "completed_by",
+   "fieldtype": "Link",
+   "label": "Completed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_sec",
+   "fieldtype": "Section Break",
+   "label": "Reference / Payment"
+  },
+  {
+   "fieldname": "reference_no",
+   "fieldtype": "Data",
+   "label": "Reference No"
+  },
+  {
+   "description": "The step's own base fee (e.g. Taeshir's appointment booking fee) — Injaz/Wakala/Police Ashara below are separate payments on top of this.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount"
+  },
+  {
+   "default": "Not Applicable",
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "label": "Payment Status",
+   "options": "Not Applicable\nPending\nPaid"
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.step_type == 'Taeshir'",
+   "fieldname": "taeshir_sec",
+   "fieldtype": "Section Break",
+   "label": "Taeshir / Injaz"
+  },
+  {
+   "description": "One row per Injaz booking attempt. A missed/unpaid appointment is Forfeited and a fresh Active attempt (new Application ID + appointment) is opened; reminders and the Injaz PDF read the latest Active attempt. Managed via clearance_api.set_taeshir_appointment / reschedule_taeshir_appointment / record_injaz_payment / forfeit_injaz_and_restart.",
+   "fieldname": "injaz_attempts",
+   "fieldtype": "Table",
+   "label": "Injaz Attempts",
+   "options": "Injaz Attempt"
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.step_type == 'Embassy'",
+   "fieldname": "embassy_sec",
+   "fieldtype": "Section Break",
+   "label": "Embassy / Wakala"
+  },
+  {
+   "description": "Documents submitted Monday, returned Thursday. Outcome is Stamped (status above) or Rejected — this remark explains why.",
+   "depends_on": "eval:doc.status == 'Rejected'",
+   "fieldname": "rejection_remark",
+   "fieldtype": "Small Text",
+   "label": "Rejection Remark"
+  },
+  {
+   "fieldname": "col_break_embassy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Paid by the foreign agency (Contractor), not internal staff — must be Paid before the Monday document submission or the Embassy step is blocked. Reminded Fri/Sat/Sun (watchdogs.wakala_reminder_watchdog).",
+   "fieldname": "wakala_amount",
+   "fieldtype": "Currency",
+   "label": "Wakala Amount"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "wakala_status",
+   "fieldtype": "Select",
+   "label": "Wakala Status",
+   "options": "Pending\nPaid"
+  },
+  {
+   "fieldname": "wakala_paid_date",
+   "fieldtype": "Date",
+   "label": "Wakala Paid Date"
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.step_type == 'Kuwait LMIS'",
+   "fieldname": "police_ashara_sec",
+   "fieldtype": "Section Break",
+   "label": "Police Ashara"
+  },
+  {
+   "fieldname": "police_ashara_appointment_date",
+   "fieldtype": "Date",
+   "label": "Appointment Date"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "police_ashara_status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nScheduled\nCompleted\nFailed"
+  },
+  {
+   "depends_on": "eval:doc.police_ashara_status == 'Failed'",
+   "fieldname": "police_ashara_remark",
+   "fieldtype": "Small Text",
+   "label": "Remark"
+  },
+  {
+   "fieldname": "col_break_police_ashara",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "police_ashara_amount",
+   "fieldtype": "Currency",
+   "label": "Amount"
+  },
+  {
+   "default": "Not Applicable",
+   "fieldname": "police_ashara_payment_status",
+   "fieldtype": "Select",
+   "label": "Payment Status",
+   "options": "Not Applicable\nPending\nPaid"
+  },
+  {
+   "collapsible": 1,
+   "description": "General-purpose payment log for this step, beyond the named ones above — every row here auto-creates a matching Pending Applicant Transaction (finance_engine.log_clearance_step_payment).",
+   "fieldname": "payments_sec",
+   "fieldtype": "Section Break",
+   "label": "Other Payments"
+  },
+  {
+   "fieldname": "payments",
+   "fieldtype": "Table",
+   "label": "Payments",
+   "options": "Clearance Step Payment"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-05 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Clearance Step",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Clearance Officer",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ticketer",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Saudi LMIS",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Saudi Taeshir",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Saudi Embassy",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Kuwait LMIS",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Kuwait Telesign",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Kuwait Embassy",
+   "write": 1
+  }
+ ],
+ "search_fields": "placement,step_type,status",
+ "sort_field": "sequence_order",
+ "sort_order": "ASC",
+ "states": []
+}

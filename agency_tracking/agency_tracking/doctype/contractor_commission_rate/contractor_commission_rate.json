@@ -1,0 +1,71 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "destination_country",
+  "entry_track",
+  "gender",
+  "rate",
+  "currency"
+ ],
+ "fields": [
+  {
+   "fieldname": "destination_country",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Destination Country",
+   "options": "Country",
+   "reqd": 1
+  },
+  {
+   "default": "Standard",
+   "fieldname": "entry_track",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Entry Track",
+   "options": "Standard\nMuayena",
+   "reqd": 1
+  },
+  {
+   "default": "Female",
+   "fieldname": "gender",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Gender",
+   "options": "Female\nMale",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rate",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Rate",
+   "reqd": 1
+  },
+  {
+   "description": "Currency this commission rate is expressed in.",
+   "fieldname": "currency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Currency",
+   "options": "SAR\nKWD\nUSD\nETB\nAED\nQAR",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-04 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Contractor Commission Rate",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

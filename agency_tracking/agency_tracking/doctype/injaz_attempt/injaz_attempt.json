@@ -1,0 +1,99 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-09-05 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "appointment_date",
+  "outcome",
+  "injaz_application_id",
+  "injaz_amount",
+  "injaz_currency",
+  "payment_status",
+  "paid_date",
+  "receipt_number",
+  "receipt_photo",
+  "remark"
+ ],
+ "fields": [
+  {
+   "description": "The booked appointment date at the Saudi (Taeshir) office for this attempt.",
+   "fieldname": "appointment_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Appointment Date"
+  },
+  {
+   "default": "Active",
+   "description": "Active = the current attempt (at most one per step). Completed = the appointment was honored and the step cleared. Missed = the appointment date passed unattended. Forfeited = superseded by a re-payment (fee lost).",
+   "fieldname": "outcome",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Outcome",
+   "options": "Active\nCompleted\nMissed\nForfeited",
+   "reqd": 1
+  },
+  {
+   "description": "The Application ID (E-number) issued on the Injaz website for this attempt. Encoded as the right-hand barcode on the generated Injaz paper; the placement's visa number is derived from it.",
+   "fieldname": "injaz_application_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Injaz Application ID"
+  },
+  {
+   "description": "The Injaz website payment for this attempt (separate from the appointment fee).",
+   "fieldname": "injaz_amount",
+   "fieldtype": "Currency",
+   "label": "Injaz Amount"
+  },
+  {
+   "default": "SAR",
+   "fieldname": "injaz_currency",
+   "fieldtype": "Select",
+   "label": "Injaz Currency",
+   "options": "SAR\nKWD\nUSD\nETB\nAED\nQAR"
+  },
+  {
+   "default": "Unpaid",
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Payment Status",
+   "options": "Unpaid\nPaid"
+  },
+  {
+   "fieldname": "paid_date",
+   "fieldtype": "Date",
+   "label": "Paid Date"
+  },
+  {
+   "fieldname": "receipt_number",
+   "fieldtype": "Data",
+   "label": "Receipt Number"
+  },
+  {
+   "fieldname": "receipt_photo",
+   "fieldtype": "Attach Image",
+   "label": "Receipt Photo"
+  },
+  {
+   "fieldname": "remark",
+   "fieldtype": "Small Text",
+   "label": "Remark"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Injaz Attempt",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

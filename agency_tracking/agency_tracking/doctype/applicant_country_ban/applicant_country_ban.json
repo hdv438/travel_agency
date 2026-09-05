@@ -1,0 +1,140 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "ACB-.#####",
+ "creation": "2026-08-29 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "applicant",
+  "country",
+  "col_break_acb",
+  "set_by",
+  "set_on",
+  "reason_sec",
+  "reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "applicant",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Applicant",
+   "options": "Applicant",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Country",
+   "options": "Country",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_acb",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "set_by",
+   "fieldtype": "Link",
+   "label": "Set By",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "set_on",
+   "fieldtype": "Datetime",
+   "label": "Set On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason_sec",
+   "fieldtype": "Section Break",
+   "label": "Reason (\"Ashara Teyezuwal\")"
+  },
+  {
+   "description": "Why this Applicant is permanently blocked from re-registering for this destination country. A returned/complaint-worthy case, reviewed by Registrar/Complaint Manager/Manager/Admin.",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Applicant Country Ban",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Complaint Manager",
+   "share": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1
+  }
+ ],
+ "search_fields": "applicant,country",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

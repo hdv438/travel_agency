@@ -1,0 +1,514 @@
+# Copyright (c) 2026, Agency and contributors
+# License: MIT. See LICENSE
+#
+# Part D: Financial Architecture. Pure logic lives here (mirrors clearance_engine.py's role);
+# whitelisted entry points live in finance_api.py. Self-registers into
+# state_machine.TRANSITION_SIDE_EFFECTS at the bottom — see agency_tracking/__init__.py for why
+# that import ordering matters (same reasoning as clearance_engine's Step 7 registration).
+
+import frappe
+from frappe.utils import today
+from decimal import Decimal
+
+from agency_tracking.state_machine import TRANSITION_SIDE_EFFECTS, log_action
+
+
+# --- FX rates (Part D: "live rate fetched at entry... as_of_date override for backdated
+# entries", Part H: "scheduled daily fetch from a currency API, cached") ---
+
+
+def get_fx_rate(currency, as_of_date=None):
+	"""Cached rate for `currency` on `as_of_date` (default today). Falls back to the most
+	recent cached rate on or before that date — the "historical lookup for backdated entries"
+	Part H describes. Throws if nothing's ever been recorded for this currency; there's no safe
+	made-up default for money.
+
+	ETB is Birr itself (2026-08-29 correction) -- there's no "conversion" to compute, so it's
+	hardcoded to 1.0 rather than requiring a Finance Manager to record a meaningless FX Rate
+	row for it."""
+	if currency == "ETB":
+		return Decimal("1.0"), as_of_date or today()
+
+	as_of_date = as_of_date or today()
+	exact = frappe.db.get_value(
+		"FX Rate", {"currency": currency, "rate_date": as_of_date}, "rate_to_birr"
+	)
+	if exact:
+		return exact, as_of_date
+
+	fallback = frappe.db.get_value(
+		"FX Rate",
+		{"currency": currency, "rate_date": ["<=", as_of_date]},
+		["rate_to_birr", "rate_date"],
+		order_by="rate_date desc",
+	)
+	if fallback:
+		return fallback[0], fallback[1]
+
+	frappe.throw(
+		f"No FX rate available for {currency} on or before {as_of_date}. "
+		"A Finance Manager needs to record one before this can be logged.",
+		frappe.ValidationError,
+	)
+
+
+def record_fx_rate(currency, rate_to_birr, rate_date=None):
+	if currency == "ETB":
+		frappe.throw("ETB is Birr itself -- it always converts 1:1, no FX rate to record.", frappe.ValidationError)
+	rate_date = rate_date or today()
+	existing = frappe.db.get_value("FX Rate", {"currency": currency, "rate_date": rate_date}, "name")
+	if existing:
+		frappe.db.set_value("FX Rate", existing, "rate_to_birr", rate_to_birr)
+		return existing
+	doc = frappe.get_doc(
+		{"doctype": "FX Rate", "currency": currency, "rate_date": rate_date, "rate_to_birr": rate_to_birr}
+	).insert(ignore_permissions=True)
+	return doc.name
+
+
+# Currencies the app converts to Birr, and the public rate source. We use ExchangeRate-API's
+# free, keyless "open" endpoint (open.er-api.com), which -- unlike ECB-sourced APIs such as
+# frankfurter.app -- actually covers ETB and the Gulf currencies (SAR/KWD/AED/QAR) this app needs.
+# frankfurter returns 404 for an ETB base, which is why the previous implementation silently
+# fetched nothing.
+FX_TARGET_CURRENCIES = ["SAR", "KWD", "USD", "AED", "QAR"]
+FX_SOURCE_URL = "https://open.er-api.com/v6/latest/ETB"
+
+
+def fetch_daily_fx_rates():
+	"""Pull live rates from a public, trusted source and cache them as FX Rate rows.
+
+	Base is ETB, so the API's rates[X] is "X per 1 ETB"; we invert to rate_to_birr = "ETB per 1 X"
+	to match how get_fx_rate/record_fx_rate store and use it. This is the auto path (Global mode);
+	Custom mode never calls it -- a Finance Manager sets rates by hand via set_fx_rate. Failures
+	must never break the app: catch broadly, log, and leave the existing cache / manual entry as
+	the fallback get_fx_rate() already provides. Returns the dict of currencies actually recorded
+	(empty on failure) so callers/tests can see what happened.
+	"""
+	import requests
+
+	recorded = {}
+	try:
+		response = requests.get(FX_SOURCE_URL, timeout=10)
+		response.raise_for_status()
+		data = response.json()
+		if data.get("result") != "success":
+			frappe.log_error(title="fetch_daily_fx_rates: source returned non-success", message=str(data)[:500])
+			return recorded
+		rates = data.get("rates", {})
+		rate_date = today()
+		for currency in FX_TARGET_CURRENCIES:
+			foreign_per_etb = rates.get(currency)
+			if foreign_per_etb:
+				rate_to_birr = round(Decimal("1.0") / Decimal(str(foreign_per_etb)), 6)
+				record_fx_rate(currency, rate_to_birr, rate_date)
+				recorded[currency] = float(rate_to_birr)
+	except Exception:
+		frappe.log_error(title="fetch_daily_fx_rates failed")
+	return recorded
+
+
+FX_INTERVAL_HOURS = {"1 Hour": 1, "3 Hours": 3, "6 Hours": 6, "Daily": 24}
+
+
+def maybe_fetch_fx_rates():
+	"""Runs hourly (hooks.py) but only actually calls the API when FX Rate Settings says to.
+	mode="Custom" -> always a no-op, Finance Manager/Admin use set_fx_rate exclusively.
+	mode="Global" -> only fires once the configured fetch_interval has actually elapsed since
+	the last successful fetch (Frappe's cron granularity doesn't support arbitrary intervals
+	directly, so this polls hourly and self-throttles)."""
+	settings = frappe.get_single("FX Rate Settings")
+	if settings.mode != "Global":
+		return
+	interval_hours = FX_INTERVAL_HOURS.get(settings.fetch_interval or "Daily", 24)
+	if settings.last_fetched_at:
+		elapsed_hours = (frappe.utils.now_datetime() - settings.last_fetched_at).total_seconds() / 3600
+		if elapsed_hours < interval_hours:
+			return
+	fetch_daily_fx_rates()
+	frappe.db.set_value("FX Rate Settings", None, "last_fetched_at", frappe.utils.now_datetime())
+
+
+# --- Commission rate resolution (Part D pseudocode, transcribed) ---
+
+
+def get_commission_rate(placement):
+	"""Resolve the commission (amount, currency) for a placement.
+
+	A per-placement manual amount always wins (one-off / negotiated deals). Otherwise fall back to
+	the contractor's default rate table, which is now keyed by destination country + entry track
+	(Standard/Muayena) + gender -- so an agency configures a rate per male/female for each track."""
+	if placement.manual_commission_amount and placement.manual_commission_currency:
+		return placement.manual_commission_amount, placement.manual_commission_currency
+
+	applicant = frappe.get_doc("Applicant", placement.applicant)
+	return get_contractor_default_rate(
+		placement.contractor, placement.destination_country, applicant.entry_track, applicant.gender
+	)
+
+
+def get_contractor_default_rate(contractor_name, destination_country, entry_track=None, gender=None):
+	"""Look up an agency's configured default rate. entry_track/gender narrow the match to the
+	specific (Standard|Muayena) x (Male|Female) row; omitting them matches the first row for the
+	country (kept for backward-compatible callers). The rate's currency is whatever the operator
+	chose on the row (SAR/KWD/USD/ETB/AED/QAR)."""
+	filters = {"parent": contractor_name, "destination_country": destination_country}
+	if entry_track:
+		filters["entry_track"] = entry_track
+	if gender:
+		filters["gender"] = gender
+	row = frappe.db.get_value("Contractor Commission Rate", filters, ["rate", "currency"])
+	if not row:
+		scope = " / ".join(filter(None, [contractor_name, destination_country, entry_track, gender]))
+		frappe.throw(
+			f"No default commission rate configured for {scope}.",
+			frappe.ValidationError,
+		)
+	return row[0], row[1]
+
+
+# --- Accrual (Part D: "on reaching Departed (default) or via manual early-trigger
+# (idempotency-guarded either way)") ---
+
+
+def accrue_commission(placement, from_status=None, actor=None):
+	if placement.is_free_replacement:
+		# Part A.4: "commission fee waived for that one cycle" — already collected on the
+		# original placement this one replaces. Not an idempotency no-op; there was never
+		# going to be a commission transaction for this placement at all.
+		return None
+	if frappe.db.exists(
+		"Applicant Transaction",
+		{"placement": placement.name, "transaction_type": "Commission", "status": ["!=", "Voided"]},
+	):
+		return None  # idempotency guard — already accrued, early-trigger or Departed alike
+
+	amount, currency = get_commission_rate(placement)
+	fx_rate, fx_rate_date = get_fx_rate(currency)
+	txn = frappe.get_doc(
+		{
+			"doctype": "Applicant Transaction",
+			"placement": placement.name,
+			"transaction_type": "Commission",
+			"amount_original": Decimal(str(amount)),
+			"currency_original": currency,
+			"fx_rate": Decimal(str(fx_rate)),
+			"fx_rate_date": fx_rate_date,
+			"amount_birr": round(Decimal(str(amount)) * Decimal(str(fx_rate)), 2),
+			"stage_logged_at": placement.status,
+			"logged_by": actor or frappe.session.user,
+			# System-computed, not a discretionary staff entry -- auto-Approved, skips the
+			# Finance review step that human-logged income/expense entries go through.
+			"status": "Approved",
+		}
+	).insert(ignore_permissions=True)
+
+	_maybe_auto_batch(placement.contractor, placement.destination_country)
+	return txn
+
+
+# --- Batching (Part D: "both paths converge on one create_batch_request() function") ---
+
+
+def _owed_commission_filters(contractor_name, destination_country):
+	placements = frappe.get_all(
+		"Placement",
+		filters={"contractor": contractor_name, "destination_country": destination_country},
+		pluck="name",
+	)
+	return {
+		"placement": ["in", placements or [""]],
+		"transaction_type": "Commission",
+		"status": "Approved",
+		"commission_batch_request": ["is", "not set"],
+	}
+
+
+def list_owed_commissions(contractor_name, destination_country, order="oldest"):
+	order_by = "creation asc" if order == "oldest" else "creation desc"
+	return frappe.get_all(
+		"Applicant Transaction",
+		filters=_owed_commission_filters(contractor_name, destination_country),
+		fields=["name", "placement", "amount_original", "currency_original", "amount_birr", "creation"],
+		order_by=order_by,
+	)
+
+
+def _original_batch_for(transaction_name):
+	"""If this commission was previously carried out of an earlier batch (its old item row was
+	marked Released), return that earlier batch for trace-back. None for a first-time batching."""
+	return frappe.db.get_value(
+		"Commission Batch Item",
+		{"transaction": transaction_name, "status": "Released"},
+		"parent",
+		order_by="modified desc",
+	)
+
+
+def _batch_item_rows(transaction_names):
+	"""Build item child rows, stamping original_batch on any commission carried over from a prior
+	batch's released (unpaid) item so the new batch shows where it was first requested."""
+	return [
+		{"transaction": t, "original_batch": _original_batch_for(t)} for t in transaction_names
+	]
+
+
+def create_batch_request(contractor_name, destination_country, transaction_names=None, requested_advance_amount=None):
+	if transaction_names is None:
+		transaction_names = frappe.get_all(
+			"Applicant Transaction",
+			filters=_owed_commission_filters(contractor_name, destination_country),
+			pluck="name",
+		)
+	if not transaction_names:
+		existing = frappe.db.get_value("Commission Batch Request", {"contractor": contractor_name}, "name")
+		if existing:
+			return frappe.get_doc("Commission Batch Request", existing)
+		batch = frappe.get_doc(
+			{
+				"doctype": "Commission Batch Request",
+				"contractor": contractor_name,
+				"destination_country": destination_country,
+				"status": "Draft",
+				"requested_advance_amount": requested_advance_amount or 0,
+				"items": [],
+			}
+		).insert(ignore_permissions=True)
+		return batch
+
+	batch = frappe.get_doc(
+		{
+			"doctype": "Commission Batch Request",
+			"contractor": contractor_name,
+			"destination_country": destination_country,
+			"status": "Draft",
+			"requested_advance_amount": requested_advance_amount or 0,
+			"items": _batch_item_rows(transaction_names),
+		}
+	).insert(ignore_permissions=True)
+
+	frappe.db.set_value(
+		"Applicant Transaction", {"name": ["in", transaction_names]}, "commission_batch_request", batch.name
+	)
+	return batch
+
+
+def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
+	"""Record an agreed discount the agency won't pay (Requested vs Paid vs Expense): books a
+	single Expense Applicant Transaction for the written-off amount, links it to the batch, and
+	lets the controller reduce balance_due (settling the batch once advance + write-off cover the
+	total). One write-off per batch. Amounts are in Birr, like the rest of the batch's money."""
+	if not write_off_reason:
+		frappe.throw("A reason is required to write off a batch amount.", frappe.ValidationError)
+	amount = Decimal(str(write_off_amount or 0))
+	if amount <= 0:
+		frappe.throw("write_off_amount must be greater than zero.", frappe.ValidationError)
+
+	batch = frappe.get_doc("Commission Batch Request", batch_name)
+	if batch.write_off_transaction:
+		frappe.throw(f"{batch_name} already has a write-off recorded.", frappe.ValidationError)
+	# Reconcile against everything already accounted for -- per-item payments + advance + this
+	# write-off can't exceed the obligation, else the batch is over-credited (audit N-1).
+	paid_items = Decimal(str(batch.paid_from_items()))
+	accounted = paid_items + Decimal(str(batch.advance_amount or 0)) + amount
+	if accounted > Decimal(str(batch.total_amount_birr or 0)):
+		frappe.throw(
+			f"Paid-per-item ({paid_items}) + advance ({batch.advance_amount or 0}) + write-off "
+			f"({amount}) cannot exceed the batch total ({batch.total_amount_birr or 0}).",
+			frappe.ValidationError,
+		)
+
+	txn = frappe.get_doc(
+		{
+			"doctype": "Applicant Transaction",
+			"transaction_type": "Expense",
+			"amount_original": amount,
+			"currency_original": "ETB",
+			"fx_rate": Decimal("1.0"),
+			"fx_rate_date": today(),
+			"amount_birr": amount,
+			"commission_batch_request": batch.name,
+			"description": f"Commission write-off (agreed discount) for {batch.name}: {write_off_reason}",
+			"stage_logged_at": "Commission Batch",
+			"logged_by": frappe.session.user,
+			# System-recorded settlement adjustment, not a discretionary human ledger entry.
+			"status": "Approved",
+		}
+	).insert(ignore_permissions=True)
+
+	batch.write_off_amount = amount
+	batch.write_off_reason = write_off_reason
+	batch.write_off_transaction = txn.name
+	batch.save(ignore_permissions=True)
+	log_action("Commission Batch Request", batch.name, f"Write-off {amount} Birr: {write_off_reason} (txn {txn.name})")
+	return batch
+
+
+def release_unpaid_items(item_names):
+	"""Carry unpaid items out of their (usually already-settled) batch back into the owed pool so
+	they can be pulled into a NEW request. The old item row stays as history, flipped to Released
+	(dropping out of the old batch's total); the underlying commission transaction is unlinked so
+	list_owed_commissions surfaces it again. The new batch stamps original_batch for trace-back."""
+	if not item_names:
+		frappe.throw("No items given.", frappe.ValidationError)
+	released, affected = [], set()
+	for item_name in item_names:
+		row = frappe.db.get_value(
+			"Commission Batch Item", item_name, ["parent", "transaction", "status"], as_dict=True
+		)
+		if not row:
+			continue
+		if row.status == "Paid":
+			frappe.throw(f"{item_name} is already Paid and cannot be released.", frappe.ValidationError)
+		if row.status == "Released":
+			continue
+		frappe.db.set_value("Applicant Transaction", row.transaction, "commission_batch_request", None)
+		frappe.db.set_value("Commission Batch Item", item_name, "status", "Released")
+		released.append(item_name)
+		if row.parent:
+			affected.add(row.parent)
+	# Recompute each source batch's total/status now that some items no longer count.
+	for batch_name in affected:
+		frappe.get_doc("Commission Batch Request", batch_name).save(ignore_permissions=True)
+		log_action("Commission Batch Request", batch_name, f"Released unpaid items back to the owed pool: {released}")
+	return {"released_items": released, "affected_batches": list(affected)}
+
+
+def settle_batch_request(batch_name, settlement_reference):
+	"""Shared by the manual settle_batch API call and the Step 9 reconciliation matcher — one
+	function both paths converge on, same reasoning as create_batch_request(). Whole-batch
+	settlement (e.g. a bank statement line matching the batch's full total) -- marks every
+	item Paid too, so the per-item and whole-batch settlement paths never disagree."""
+	if not settlement_reference:
+		frappe.throw("A settlement reference is required.", frappe.ValidationError)
+	batch = frappe.get_doc("Commission Batch Request", batch_name)
+	if batch.status == "Settled":
+		return batch  # idempotent — a statement line re-matched against an already-settled batch is a no-op
+	for item in batch.items:
+		item.status = "Paid"
+	batch.status = "Settled"
+	batch.settlement_reference = settlement_reference
+	batch.settled_on = today()
+	batch.save(ignore_permissions=True)
+	return batch
+
+
+def _sync_batch_status_from_items(batch):
+	"""Batch-level status follows its items: any Paid but not all -> Partially Settled; all
+	Paid -> Settled (settled_on stamped once, on first reaching that point)."""
+	statuses = [item.status for item in batch.items]
+	if statuses and all(s == "Paid" for s in statuses):
+		batch.status = "Settled"
+		if not batch.settled_on:
+			batch.settled_on = today()
+	elif any(s == "Paid" for s in statuses):
+		batch.status = "Partially Settled"
+	batch.save(ignore_permissions=True)
+
+
+def mark_batch_items_paid(item_names):
+	"""Explicit multi-select manual settlement -- item_names are Commission Batch Item child
+	row names. Groups by parent batch so each affected batch's status gets synced once."""
+	if not item_names:
+		frappe.throw("No items given.", frappe.ValidationError)
+	affected_batches = set()
+	for item_name in item_names:
+		parent = frappe.db.get_value("Commission Batch Item", item_name, "parent")
+		frappe.db.set_value("Commission Batch Item", item_name, "status", "Paid")
+		if parent:
+			affected_batches.add(parent)
+	for batch_name in affected_batches:
+		batch = frappe.get_doc("Commission Batch Request", batch_name)
+		_sync_batch_status_from_items(batch)
+	return {"updated_items": item_names, "affected_batches": list(affected_batches)}
+
+
+def match_batch_payment_proof(batch_name, file_url):
+	"""Agency sends a CSV or PDF listing paid applicant names -- best-effort parse + fuzzy
+	name match against this batch's own item list (via each item's Applicant Transaction ->
+	Placement -> Applicant). Unmatched names are simply skipped (stay Pending for manual
+	settle_batch_items review), same 'never blocks' philosophy as contract_parser.py and the
+	existing bank-statement reconciliation matcher."""
+	from agency_tracking.reconciliation_engine import parse_paid_applicant_names
+
+	paid_names = parse_paid_applicant_names(file_url)
+	batch = frappe.get_doc("Commission Batch Request", batch_name)
+
+	matched_items = []
+	unmatched_names = set(paid_names)
+	for item in batch.items:
+		if item.status == "Paid":
+			continue
+		placement_name = frappe.db.get_value("Applicant Transaction", item.transaction, "placement")
+		if not placement_name:
+			continue
+		applicant_name = frappe.db.get_value("Placement", placement_name, "applicant")
+		full_name = frappe.db.get_value("Applicant", applicant_name, "full_name") or ""
+		match = next((p for p in unmatched_names if p.strip().lower() == full_name.strip().lower()), None)
+		if match:
+			item.status = "Paid"
+			matched_items.append(item.name)
+			unmatched_names.discard(match)
+
+	_sync_batch_status_from_items(batch)
+	return {
+		"matched_items": matched_items,
+		"unmatched_names": list(unmatched_names),
+	}
+
+
+def render_batch_invoice_pdf(batch_name):
+	"""On-demand PDF (applicant names + amounts) via Frappe's standard print/wkhtmltopdf path
+	-- not pre-generated/stored at batch creation, built fresh whenever requested."""
+	batch = frappe.get_doc("Commission Batch Request", batch_name)
+	rows = []
+	for item in batch.items:
+		placement_name = frappe.db.get_value("Applicant Transaction", item.transaction, "placement")
+		applicant_name = frappe.db.get_value("Placement", placement_name, "applicant") if placement_name else None
+		full_name = frappe.db.get_value("Applicant", applicant_name, "full_name") if applicant_name else "—"
+		amount = frappe.db.get_value("Applicant Transaction", item.transaction, "amount_birr")
+		rows.append({"full_name": full_name, "amount_birr": amount, "status": item.status})
+
+	html = frappe.render_template(
+		"agency_tracking/templates/commission_batch_invoice.html",
+		{"batch": batch, "rows": rows, "contractor_name": frappe.db.get_value("Contractor", batch.contractor, "contractor_name")},
+	)
+	return frappe.utils.pdf.get_pdf(html)
+
+
+def _maybe_auto_batch(contractor_name, destination_country):
+	contractor = frappe.get_doc("Contractor", contractor_name)
+	if contractor.batch_mode != "Auto-Threshold" or not contractor.batch_threshold:
+		return
+	unbatched_count = frappe.db.count(
+		"Applicant Transaction", filters=_owed_commission_filters(contractor_name, destination_country)
+	)
+	if unbatched_count >= contractor.batch_threshold:
+		create_batch_request(contractor_name, destination_country)
+
+
+# --- Placement-stage write authorization (addendum: "whoever's assigned to the placement's
+# current stage, via a narrow whitelisted function") ---
+
+
+def is_assigned_to_placement(user, placement_name):
+	clearance_step_names = frappe.get_all(
+		"Clearance Step", filters={"placement": placement_name}, pluck="name"
+	)
+	has_clearance_todo = bool(clearance_step_names) and frappe.db.exists(
+		"ToDo",
+		{
+			"reference_type": "Clearance Step",
+			"reference_name": ["in", clearance_step_names],
+			"allocated_to": user,
+			"status": "Open",
+		},
+	)
+	has_placement_todo = frappe.db.exists(
+		"ToDo",
+		{"reference_type": "Placement", "reference_name": placement_name, "allocated_to": user, "status": "Open"},
+	)
+	return bool(has_clearance_todo or has_placement_todo)
+
+
+TRANSITION_SIDE_EFFECTS[("Placement", "Departed")] = accrue_commission

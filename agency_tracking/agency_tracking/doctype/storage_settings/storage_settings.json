@@ -1,0 +1,86 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-29 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "r2_sec",
+  "r2_account_id",
+  "r2_bucket_name",
+  "r2_public_url_base",
+  "col_break_r2",
+  "r2_access_key_id",
+  "r2_secret_access_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "r2_sec",
+   "fieldtype": "Section Break",
+   "label": "Cloudflare R2"
+  },
+  {
+   "fieldname": "r2_account_id",
+   "fieldtype": "Data",
+   "label": "Account ID"
+  },
+  {
+   "fieldname": "r2_bucket_name",
+   "fieldtype": "Data",
+   "label": "Bucket Name"
+  },
+  {
+   "description": "Public bucket URL or custom domain, used to build the stored file URL (e.g. receipt_image) — no trailing slash.",
+   "fieldname": "r2_public_url_base",
+   "fieldtype": "Data",
+   "label": "Public URL Base"
+  },
+  {
+   "fieldname": "col_break_r2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "r2_access_key_id",
+   "fieldtype": "Data",
+   "label": "Access Key ID"
+  },
+  {
+   "fieldname": "r2_secret_access_key",
+   "fieldtype": "Password",
+   "label": "Secret Access Key"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Storage Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

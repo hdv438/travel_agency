@@ -1,0 +1,423 @@
+# Copyright (c) 2026, Agency and contributors
+# License: MIT. See LICENSE
+#
+# Part C of master-build-specification.md: two enforcement points.
+#   validate()   — is the data allowed to exist in this state? (lives on each doctype)
+#   transition() — is this process move allowed right now? (lives here, shared)
+#
+# Built starting Step 1 (not deferred to Step 6 as Part I's sequence might suggest) because
+# CLAUDE.md's rule is absolute: no doc.status = X; doc.save() anywhere, ever. Only the contents
+# of ALLOWED_TRANSITIONS and STAGE_GATES grow as later build steps add doctypes/stages — the
+# function itself never changes shape. See BUILD_LOG.md "Standing decisions".
+import traceback
+
+import frappe
+from frappe.utils import get_datetime
+
+
+def log_action(reference_doctype, reference_name, remarks, event_type="Action", actor=None):
+	"""Append a Process Event for a non-transition action (write-off, Injaz payment, contractor
+	edit, PDF download, ...) so the audit trail answers "who did what, when" for actions that don't
+	go through transition(). event_type is "Action" for a state-affecting op or "Access" for a
+	read/download. Best-effort: never raise into the caller (the action already happened)."""
+	try:
+		frappe.get_doc(
+			{
+				"doctype": "Process Event",
+				"reference_doctype": reference_doctype,
+				"reference_name": reference_name,
+				"event_type": event_type,
+				"actor": actor or frappe.session.user,
+				"remarks": remarks,
+			}
+		).insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(title="log_action failed", message=f"{reference_doctype} {reference_name}: {remarks}")
+
+
+def lock_applicant_row(applicant_name):
+	"""Row-level lock (SELECT ... FOR UPDATE), held until the current request's transaction
+	commits. Used anywhere two concurrent requests could both read active_placement as empty
+	before either writes it — portal selection (Step 3) and Muayena direct-entry (Step 4)."""
+	frappe.db.sql("SELECT `name` FROM `tabApplicant` WHERE `name`=%s FOR UPDATE", applicant_name)
+
+
+# Fields that describe *where a record sits in its lifecycle* or *which record it is* -- never
+# something a document parser is allowed to write. Parsing (passport MRZ, contract, visa, injaz)
+# is strictly informational: it may auto-fill data fields and attach the file, but the ONLY
+# sanctioned way to move a record's stage is transition() (invoked from an explicit button/RPC
+# like register_applicant / advance_placement). Consumers of parsed data
+# (placement_api.upload_contract/upload_visa, Applicant.autofill_from_passport) run it through
+# strip_lifecycle_fields() before applying, so even if a parser regex someday captured a stray
+# "status"/"docstatus" token, it can never silently advance or mutate the lifecycle.
+LIFECYCLE_FIELDS = frozenset({
+	"status",
+	"applicant_state",
+	"docstatus",
+	"name",
+	"active_placement",
+	"departed_on",
+	"entry_track",
+})
+
+
+def strip_lifecycle_fields(data):
+	"""Return a copy of a parsed-data dict with any lifecycle/identity keys removed. No-op for
+	falsy input. Keeps document parsing informational-only (see LIFECYCLE_FIELDS)."""
+	if not data:
+		return data
+	return {k: v for k, v in data.items() if k not in LIFECYCLE_FIELDS}
+
+
+# --- Terminal-state guards (2026-08-31, cc2 QA pass findings NEW-1 / NEW-3) ---
+# A class of endpoints record an outcome via a plain doc.save() rather than transition() (they
+# don't change Placement.status themselves -- record_ticket_details, record_reschedule, the
+# medical-result recorders, and every Clearance Step action below), so ALLOWED_TRANSITIONS/
+# STAGE_GATES never see them and never got a chance to block a write once the parent record is
+# already in a terminal state. Confirmed live: a Ticketer could silently rewrite ticket_number
+# on an already-Departed Placement, and a Kuwait Embassy user could flip an already-Stamped step
+# on an already-Departed Placement back to Rejected -- both with no audit trail (no Process
+# Event, since neither goes through transition()). These two shared guards are the single place
+# every such action now checks before writing, rather than patching each endpoint in isolation.
+
+TERMINAL_PLACEMENT_STATUSES = {"Departed", "Cancelled"}
+TERMINAL_CLEARANCE_STEP_STATUSES = {"Issued", "Complete", "Stamped", "Rejected"}
+
+
+def assert_placement_not_terminal(placement):
+	"""Guards every Placement-mutating action that records an outcome without itself being a
+	transition() call (record_ticket_details, record_reschedule,
+	record_selected_medical_result, record_predeparture_medical_result). Once Departed/Cancelled,
+	ticketing/medical data is a historical record, not something a routine action should still
+	be able to silently overwrite."""
+	if placement.status in TERMINAL_PLACEMENT_STATUSES:
+		frappe.throw(
+			f"{placement.name} is already {placement.status} (terminal) -- this can no longer "
+			"be edited through this action.",
+			frappe.ValidationError,
+		)
+
+
+def assert_clearance_step_not_terminal(step):
+	"""Guards every Clearance-Step-mutating action (start/complete_clearance_step,
+	submit/stamp/reject_embassy_step, reassign_clearance_step). Once a step itself reaches a
+	terminal outcome, or its parent Placement is already Departed/Cancelled, it's a historical
+	record -- flipping a Stamped step to Rejected (or vice versa) after the fact produces
+	self-contradictory data (a Departed placement whose corridor step says it never cleared)."""
+	if step.status in TERMINAL_CLEARANCE_STEP_STATUSES:
+		frappe.throw(
+			f"{step.name} is already {step.status} (terminal) -- this can no longer be edited "
+			"through this action.",
+			frappe.ValidationError,
+		)
+	placement_status = frappe.db.get_value("Placement", step.placement, "status")
+	if placement_status in TERMINAL_PLACEMENT_STATUSES:
+		frappe.throw(
+			f"{step.placement} is already {placement_status} -- its Clearance Steps can no "
+			"longer be edited.",
+			frappe.ValidationError,
+		)
+
+
+# doctype -> set of (from_status, to_status) edges that are legal to attempt.
+# Extended as each build step introduces new statuses (Placement's Selected/Processing/
+# Stamped/Ticketed/Departed land here from Step 3 onward).
+ALLOWED_TRANSITIONS = {
+	"Applicant": {
+		("Draft", "Registered"),
+		("Registered", "CV Generated"),
+		("Registered", "Cancelled"),
+		("CV Generated", "Cancelled"),
+		# entry_track-forced regression (applicant_api.update_applicant) and Cancelled->restart
+		# (applicant_api.restart_applicant) both land here -- Draft->Cancelled is deliberately
+		# NOT an edge (Cancelled only applies once something is committed, Registered onward).
+		("Registered", "Draft"),
+		("CV Generated", "Draft"),
+		("Cancelled", "Draft"),
+		("Cancelled", "Registered"),
+	},
+	"Placement": {
+		("Selected", "Processing"),
+		("Processing", "Stamped"),
+		("Stamped", "Ticketed"),
+		("Ticketed", "Departed"),
+		# Cancellable from any pre-Departed stage (applicant_api.cancel_applicant cascades
+		# here) -- Departed stays terminal/uncancellable.
+		("Selected", "Cancelled"),
+		("Processing", "Cancelled"),
+		("Stamped", "Cancelled"),
+		("Ticketed", "Cancelled"),
+	},
+	"Applicant Transaction": {
+		("Pending", "Approved"),
+		("Pending", "Rejected"),
+		("Approved", "Voided"),
+	},
+	"Complaint": {
+		("New", "Unresolved"),
+		("Unresolved", "Resolved"),
+		("Unresolved", "Returned - Free Replacement Required"),
+		("Unresolved", "Escalated"),
+		("Unresolved", "Dismissed"),
+	},
+}
+
+# (from_status, to_status) -> callable(doc) -> bool. Applicant's Draft->Registered move has no
+# cross-doctype gate (just the field-floor/medical check already in Applicant.validate()).
+# Registered->CV Generated is gated on cv_generation_gate (Standard track only, Step 2).
+# Placement's Ticketed->Departed is gated on medical_2_gate (Step 6). Processing->Stamped is
+# gated on all_mandatory_clearance_steps_complete (Step 7, below). Selected->Processing and
+# Stamped->Ticketed have no gate — nothing to check against for either.
+STAGE_GATES = {}
+
+# (doctype, to_status) -> callable(doc). Runs once, after a transition has already committed
+# (doc.save() + Process Event logged) — orchestration, not validation; a side effect here
+# can't block the move itself (that's what STAGE_GATES is for). Keeps transition() the single
+# place that drives cross-doctype consequences (Part C: "triggers reopen_for_reprocessing()...
+# triggers commission accrual on reaching Departed") instead of scattering them across callers.
+TRANSITION_SIDE_EFFECTS = {}
+
+
+def transition(doc, new_status, actor=None, override=False, override_reason=None, remarks=None):
+	"""The only sanctioned status-change path. Validates the move is a legal edge for this
+	doctype, runs any registered gate, commits the change (which re-triggers the doctype's
+	own validate() against the new status), logs a Process Event, and returns the saved doc.
+
+	Manager Override (business-workflow-srs.md: "can override a blocked step... always with a
+	written reason"): if a gate blocks the move, override=True + a non-empty override_reason
+	lets a Manager/Admin force it through anyway. Override only ever bypasses a *gate* — the
+	ALLOWED_TRANSITIONS topology itself is never overridable; there's no business case in the
+	spec for skipping an entire lifecycle stage, only for forcing past a blocked condition
+	within an otherwise-legal move.
+
+	remarks: recorded on the Process Event same as override_reason, but for plain (non-gated)
+	transitions that still want a reason on the audit trail -- e.g. cancel_applicant's written
+	cancellation reason, which isn't an override of anything.
+	"""
+	current_status = doc.status
+	allowed = ALLOWED_TRANSITIONS.get(doc.doctype, set())
+	if (current_status, new_status) not in allowed:
+		frappe.throw(
+			"Cannot move {0} {1} from '{2}' to '{3}'.".format(
+				doc.doctype, doc.name, current_status, new_status
+			),
+			frappe.ValidationError,
+		)
+
+	gate = STAGE_GATES.get((current_status, new_status))
+	gate_result = gate(doc) if gate else True
+	gate_passed = gate_result is True
+	is_override = bool(gate) and not gate_passed
+
+	if is_override:
+		if not override:
+			# Gate functions may return a specific reason string instead of a bare False
+			# (mirrors validate_field_floor's specific field list) -- fall back to the gate
+			# function's own name/docstring when it doesn't, so the message is never fully
+			# generic even for older gates that haven't been updated to return a reason.
+			reason = gate_result if isinstance(gate_result, str) and gate_result else (
+				gate.__doc__.strip().splitlines()[0] if gate.__doc__ else gate.__name__
+			)
+			frappe.throw(
+				"'{0}' -> '{1}' is blocked: {2}".format(current_status, new_status, reason),
+				frappe.ValidationError,
+			)
+		if not ({"Manager", "Admin"} & set(frappe.get_roles())):
+			frappe.throw("Only Manager or Admin can override a blocked transition.", frappe.PermissionError)
+		if not override_reason:
+			frappe.throw("A written reason is required to override this gate.", frappe.ValidationError)
+
+	actor = actor or frappe.session.user
+	doc.status = new_status
+	doc.save()
+
+	frappe.get_doc(
+		{
+			"doctype": "Process Event",
+			"reference_doctype": doc.doctype,
+			"reference_name": doc.name,
+			"event_type": "Override" if is_override else "Transition",
+			"from_status": current_status,
+			"to_status": new_status,
+			"actor": actor,
+			"remarks": override_reason if is_override else remarks,
+		}
+	).insert(ignore_permissions=True)
+
+	side_effect = TRANSITION_SIDE_EFFECTS.get((doc.doctype, new_status))
+	if side_effect:
+		try:
+			side_effect(doc, current_status)
+		except Exception:
+			# Side effects run after the transition has already committed (doc.save() +
+			# Process Event, both above). Letting an exception here propagate would make
+			# transition() look like it failed to the caller while the status change actually
+			# went through — corrupting the "only sanctioned path" guarantee (a caller who
+			# catches the exception and retries, or assumes nothing happened, would be wrong).
+			# Side effects are best-effort automation layered on top of a transition that has
+			# already legitimately happened; only STAGE_GATES may block a transition itself.
+			# Real failures (e.g. commission accrual missing a configured rate) are logged for
+			# staff to notice and resolve manually, not silently lost.
+			frappe.logger().error(f"Transition side effect failed: {doc.doctype} {doc.name}: {current_status} -> {new_status}\n{traceback.format_exc()}")
+			frappe.log_error(
+				title="Transition side effect failed",
+				message=f"{doc.doctype} {doc.name}: {current_status} -> {new_status}\n\n{traceback.format_exc()}",
+			)
+
+	return doc
+
+
+def cv_generation_gate(applicant):
+	"""Registered -> CV Generated (Part A.2 Stage 3): Standard track only.
+
+	2026-08-29: the Musaned gate (blocking CV generation for Saudi-bound Standard candidates
+	until musaned_status == ALTEYAZECHEM) and the musaned_status field itself have both been
+	removed per direct instruction -- Musaned tracking is no longer part of this system at all.
+	"""
+	if applicant.entry_track == "Standard":
+		return True
+	return f"only Standard-track applicants generate a CV (this applicant is {applicant.entry_track})."
+
+
+STAGE_GATES[("Registered", "CV Generated")] = cv_generation_gate
+
+
+# --- Medical 2 gate (Part A.2 Stage 8 / Step 6) ---
+# The pre-departure check (~72h before flight) is separate from the earlier registration-time
+# FIT check — a candidate can pass the first medical, get all the way to Ticketed, and still
+# fail this one. "If this fails, the flight is cancelled and departure is blocked."
+
+
+def medical_2_gate(placement):
+	if placement.medical_2_status == "FIT":
+		return True
+	return (
+		f"pre-departure medical (Medical 2) status is '{placement.medical_2_status}', "
+		"must be FIT. Record it via placement_api.record_predeparture_medical_result."
+	)
+
+
+def passport_valid_for_departure(placement):
+	"""Audit G-016: a passport valid at registration can lapse before departure (only medical was
+	re-checked this late). Block Departed if the applicant's passport has expired."""
+	expiry = frappe.db.get_value("Applicant", placement.applicant, "passport_expiry_date")
+	if expiry and get_datetime(expiry).date() < frappe.utils.getdate():
+		return f"passport expired on {expiry}; it must be renewed before departure."
+	return True
+
+
+def departure_gate(placement):
+	"""Combined Ticketed -> Departed gate: pre-departure medical FIT AND a non-expired passport."""
+	medical = medical_2_gate(placement)
+	if medical is not True:
+		return medical
+	return passport_valid_for_departure(placement)
+
+
+STAGE_GATES[("Ticketed", "Departed")] = departure_gate
+
+
+# --- Post-contract medical gate (2026-08-29, new) ---
+# A fresh checkpoint right after contract upload/Placement creation, distinct from both the
+# Applicant's earlier registration-time FIT check and the pre-departure Medical 2 check above.
+# UNFIT here doesn't just block the gate -- it cancels the whole Applicant + Placement (see
+# applicant_api.cancel_applicant, called by placement_api.record_selected_medical_result).
+# Applies uniformly to Standard (Saudi/Kuwait) and Muayena.
+
+
+def medical_selected_gate(placement):
+	if placement.medical_selected_status == "FIT":
+		return True
+	return (
+		f"medical (Selected stage) status is '{placement.medical_selected_status}', must be FIT. "
+		"Record it via placement_api.record_selected_medical_result."
+	)
+
+
+STAGE_GATES[("Selected", "Processing")] = medical_selected_gate
+
+
+# --- All-mandatory-clearance-steps-complete gate (Part A.2 Stage 6 / Step 7) ---
+# "Stamped — all mandatory corridor steps issued." Optional steps (is_mandatory=0) don't block.
+
+
+CLEARANCE_STEP_DONE_STATUSES = {"Complete", "Issued", "Stamped"}
+
+
+def all_mandatory_clearance_steps_complete(placement):
+	steps = frappe.get_all(
+		"Clearance Step",
+		filters={"placement": placement.name, "is_mandatory": 1},
+		fields=["step_type", "status"],
+	)
+	if not steps:
+		return "no mandatory Clearance Steps exist yet for this Placement."
+	pending = [f"{s.step_type} ({s.status})" for s in steps if s.status not in CLEARANCE_STEP_DONE_STATUSES]
+	if pending:
+		return "mandatory Clearance Steps not yet complete: " + ", ".join(pending)
+	return True
+
+
+STAGE_GATES[("Processing", "Stamped")] = all_mandatory_clearance_steps_complete
+
+
+# --- Ticket-recorded gate (2026-08-30, backend-issues #05) ---
+# Nothing previously gated "Ticketed" on ticket data actually existing -- a placement could
+# reach Ticketed with ticket_number/flight_date both still null. Require a ticket_number so
+# "Ticketed" reliably means a ticket was recorded (placement_api.record_ticket_details).
+
+
+def ticket_recorded_gate(placement):
+	if placement.ticket_number:
+		return True
+	return "no ticket_number recorded yet. Call placement_api.record_ticket_details first."
+
+
+STAGE_GATES[("Stamped", "Ticketed")] = ticket_recorded_gate
+
+
+# --- Free-replacement window gate (Part A.4 / Step 10) ---
+# "A 3-month window from departure, during which a returned worker triggers a free replacement
+# obligation." Measured from Placement.departed_on (stamped once, on first entry to Departed —
+# see Placement.stamp_departed_on), not the complaint's own creation date.
+
+FREE_REPLACEMENT_WINDOW_DAYS = 90
+
+
+def within_free_replacement_window(complaint):
+	placement = frappe.get_doc("Placement", complaint.placement)
+	if not placement.departed_on:
+		return f"{placement.name} has no departed_on date recorded (never reached Departed)."
+
+	departed_on = get_datetime(placement.departed_on) if isinstance(placement.departed_on, str) else placement.departed_on
+	days_since_departure = (frappe.utils.now_datetime() - departed_on).days
+	if days_since_departure <= FREE_REPLACEMENT_WINDOW_DAYS:
+		return True
+	return (
+		f"{days_since_departure} days have passed since departure, "
+		f"outside the {FREE_REPLACEMENT_WINDOW_DAYS}-day free-replacement window."
+	)
+
+
+STAGE_GATES[("Unresolved", "Returned - Free Replacement Required")] = within_free_replacement_window
+
+
+# --- Applicant cycle_number bump (2026-08-29 lifecycle spec) ---
+# "Increments if and only if the status transition lands specifically on Draft or Registered,
+# coming from an already-completed state (Registered, CV Generated, or Cancelled)." Covers both
+# trigger paths uniformly -- entry_track-forced regression (applicant_api.update_applicant) and
+# Cancelled->restart (applicant_api.restart_applicant) -- since both just call transition() and
+# land here. A plain edit that never changes status never touches this at all.
+
+CYCLE_BUMP_FROM_STATUSES = {"Registered", "CV Generated", "Cancelled"}
+
+
+def bump_cycle_number(applicant, from_status):
+	if from_status in CYCLE_BUMP_FROM_STATUSES:
+		frappe.db.set_value(
+			"Applicant", applicant.name, "cycle_number", (applicant.cycle_number or 1) + 1
+		)
+
+
+TRANSITION_SIDE_EFFECTS[("Applicant", "Draft")] = bump_cycle_number
+TRANSITION_SIDE_EFFECTS[("Applicant", "Registered")] = bump_cycle_number

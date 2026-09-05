@@ -1,0 +1,52 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "transaction",
+  "status",
+  "original_batch"
+ ],
+ "fields": [
+  {
+   "fieldname": "transaction",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Applicant Transaction",
+   "options": "Applicant Transaction",
+   "reqd": 1
+  },
+  {
+   "default": "Pending",
+   "description": "2026-08-29: per-item settlement, so a batch can be partially paid (some applicants paid, some still owed) rather than all-or-nothing. 'Released' means this unpaid item was carried out of this batch into a later one (finance_api.release_unpaid_items) -- it stays here for history but no longer counts toward this batch's total.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Pending\nPaid\nReleased"
+  },
+  {
+   "description": "Set when this item was carried over from a prior batch's unpaid item (trace-back to where the commission was first requested).",
+   "fieldname": "original_batch",
+   "fieldtype": "Link",
+   "label": "Carried From Batch",
+   "options": "Commission Batch Request",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Commission Batch Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

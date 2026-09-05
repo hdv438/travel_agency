@@ -1,0 +1,320 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "TXN-.#####",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "applicant",
+  "placement",
+  "cycle_number",
+  "transaction_type",
+  "stage_logged_at",
+  "col_break_txn",
+  "status",
+  "logged_by",
+  "amount_sec",
+  "amount_original",
+  "currency_original",
+  "col_break_amount",
+  "fx_rate",
+  "fx_rate_date",
+  "amount_birr",
+  "description",
+  "receipt_image",
+  "commission_batch_request",
+  "approval_sec",
+  "approved_by",
+  "approved_on",
+  "col_break_approval",
+  "rejection_reason"
+ ],
+ "fields": [
+  {
+   "description": "Optional — set for registration-fee entries logged before any Placement exists (Applicant.log_fee_transaction). Most transactions are traceable via placement instead.",
+   "fieldname": "applicant",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Applicant",
+   "options": "Applicant",
+   "read_only": 1
+  },
+  {
+   "description": "Part B: optional — not every transaction is placement-scoped (e.g. general agency overhead logged directly by staff).",
+   "fieldname": "placement",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Placement",
+   "options": "Placement",
+   "read_only": 1
+  },
+  {
+   "description": "Copied from the owning Applicant/Placement's cycle_number at creation time, when placement is set.",
+   "fieldname": "cycle_number",
+   "fieldtype": "Int",
+   "label": "Cycle Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transaction_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Transaction Type",
+   "options": "Commission\nRefund\nIncome\nExpense",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Placement status at the moment this was logged (a snapshot, not a live reference).",
+   "fieldname": "stage_logged_at",
+   "fieldtype": "Data",
+   "label": "Stage Logged At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_txn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Pending",
+   "description": "2026-08-29: any internal staff can log an entry (Pending); only Finance Manager/Admin approval moves it to Approved, at which point it counts toward ledger/balance totals. Rejected/Voided never count.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nApproved\nRejected\nVoided",
+   "read_only": 1
+  },
+  {
+   "fieldname": "logged_by",
+   "fieldtype": "Link",
+   "label": "Logged By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amount_sec",
+   "fieldtype": "Section Break",
+   "label": "Amount"
+  },
+  {
+   "fieldname": "amount_original",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount (Original)",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "currency_original",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Currency (Original)",
+   "options": "SAR\nKWD\nUSD\nETB\nAED\nQAR",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_amount",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fx_rate",
+   "fieldtype": "Float",
+   "label": "FX Rate (to Birr)",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "fx_rate_date",
+   "fieldtype": "Date",
+   "label": "FX Rate Date",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "amount_birr",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount (Birr)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description/Remark"
+  },
+  {
+   "description": "Upload here -- automatically moved to Cloudflare R2 (agency/{applicant}/finance-receipts/) on save, this field then holds the R2 URL, not a local Frappe file.",
+   "fieldname": "receipt_image",
+   "fieldtype": "Attach",
+   "label": "Receipt"
+  },
+  {
+   "fieldname": "commission_batch_request",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Commission Batch Request",
+   "options": "Commission Batch Request",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "approval_sec",
+   "fieldtype": "Section Break",
+   "label": "Approval"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved/Rejected By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved/Rejected On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_approval",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.status == 'Rejected'",
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Applicant Transaction",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Registrar"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Clearance Officer"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Ticketer"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Complaint Manager"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Contract Parser"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Saudi LMIS"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Saudi Taeshir"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Saudi Embassy"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Kuwait LMIS"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Kuwait Telesign"
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Kuwait Embassy"
+  }
+ ],
+ "search_fields": "placement,transaction_type,status",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

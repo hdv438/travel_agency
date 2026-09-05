@@ -1,0 +1,64 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "statement_date",
+  "reference",
+  "amount",
+  "match_status",
+  "matched_batch"
+ ],
+ "fields": [
+  {
+   "fieldname": "statement_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Reference / Description"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount (Birr)",
+   "reqd": 1
+  },
+  {
+   "default": "Unmatched",
+   "fieldname": "match_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Match Status",
+   "options": "Unmatched\nMatched\nManually Matched"
+  },
+  {
+   "fieldname": "matched_batch",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Matched Commission Batch Request",
+   "options": "Commission Batch Request"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Bank Statement Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

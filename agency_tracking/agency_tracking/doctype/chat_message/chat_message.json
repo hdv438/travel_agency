@@ -1,0 +1,97 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "CHM-.#####",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "thread",
+  "sender",
+  "col_break_msg",
+  "mentioned_applicant",
+  "mentioned_placement",
+  "message_sec",
+  "message",
+  "attachment"
+ ],
+ "fields": [
+  {
+   "fieldname": "thread",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Thread",
+   "options": "Chat Thread",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "sender",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Sender",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_msg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "@mention (addendum): a typed-search link, not a permission grant — read access to the mentioned record still goes through its own permission check.",
+   "fieldname": "mentioned_applicant",
+   "fieldtype": "Link",
+   "label": "Mentioned Applicant",
+   "options": "Applicant"
+  },
+  {
+   "fieldname": "mentioned_placement",
+   "fieldtype": "Link",
+   "label": "Mentioned Placement",
+   "options": "Placement"
+  },
+  {
+   "fieldname": "message_sec",
+   "fieldtype": "Section Break",
+   "label": "Message"
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Small Text",
+   "label": "Message"
+  },
+  {
+   "description": "2026-08-29: image/file attachment -- chat was text-only before this. A message must have at least a message or an attachment (chat_api.send_message enforces this).",
+   "fieldname": "attachment",
+   "fieldtype": "Attach",
+   "label": "Attachment"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Chat Message",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "thread,sender",
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": []
+}

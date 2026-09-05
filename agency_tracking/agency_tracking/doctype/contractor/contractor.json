@@ -1,0 +1,159 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:contractor_name",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "contractor_name",
+  "country",
+  "col_break_contractor",
+  "user",
+  "communication_manager",
+  "finance_sec",
+  "batch_mode",
+  "batch_threshold",
+  "default_commission_rates"
+ ],
+ "fields": [
+  {
+   "fieldname": "contractor_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Contractor / Foreign Agency Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Country",
+   "options": "Country",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_contractor",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The portal login for this agency (Part G: one Foreign Agency user per Contractor for now).",
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Portal User",
+   "options": "User",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "addendum-post-spec-refinements.md: per-contractor routing for agency→Communication-Manager chat, for continuity. Falls back to round-robin among all Communication Manager users when unset.",
+   "fieldname": "communication_manager",
+   "fieldtype": "Link",
+   "label": "Communication Manager",
+   "options": "User"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "finance_sec",
+   "fieldtype": "Section Break",
+   "label": "Finance (Finance Manager / Admin only — addendum field-level permission)",
+   "permlevel": 1
+  },
+  {
+   "default": "Manual Only",
+   "fieldname": "batch_mode",
+   "fieldtype": "Select",
+   "label": "Batch Mode",
+   "options": "Manual Only\nAuto-Threshold",
+   "permlevel": 1
+  },
+  {
+   "depends_on": "eval:doc.batch_mode == 'Auto-Threshold'",
+   "description": "Auto-generate a Commission Batch Request once this many unbatched owed commissions accumulate for this agency+country.",
+   "fieldname": "batch_threshold",
+   "fieldtype": "Int",
+   "label": "Batch Threshold",
+   "permlevel": 1
+  },
+  {
+   "fieldname": "default_commission_rates",
+   "fieldtype": "Table",
+   "label": "Default Commission Rates",
+   "options": "Contractor Commission Rate",
+   "permlevel": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-05 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Contractor",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "Finance Manager",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "Admin",
+   "write": 1
+  }
+ ],
+ "search_fields": "contractor_name,country",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "contractor_name"
+}

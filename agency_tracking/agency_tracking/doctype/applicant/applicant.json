@@ -1,0 +1,824 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "APP-.#####",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "identity_sec",
+  "entry_track",
+  "first_name",
+  "middle_name",
+  "last_name",
+  "full_name",
+  "gender",
+  "nationality",
+  "col_break_identity",
+  "phone",
+  "address",
+  "date_of_birth",
+  "age",
+  "height",
+  "weight",
+  "complexion",
+  "photo_full_body",
+  "registration_sec",
+  "national_id",
+  "labor_id",
+  "destination_country",
+  "religion",
+  "marital_status",
+  "col_break_registration",
+  "target_job",
+  "education",
+  "salary_amount",
+  "salary_currency",
+  "emergency_contact_name",
+  "emergency_contact_phone",
+  "emergency_contact_address",
+  "passport_sec",
+  "passport_number",
+  "passport_issue_date",
+  "passport_expiry_date",
+  "col_break_passport",
+  "passport_issue_place",
+  "passport_scan",
+  "photograph",
+  "needs_passport_review",
+  "medical_sec",
+  "medical_status",
+  "col_break_medical",
+  "medical_issue_date",
+  "medical_expiry_date",
+  "education_experience_sec",
+  "institution",
+  "graduation_year",
+  "english_level",
+  "arabic_level",
+  "col_break_edu",
+  "current_employer",
+  "years_of_experience",
+  "experience_country",
+  "experience_period",
+  "education_remarks",
+  "experience_video",
+  "skills_sec",
+  "skill_cleaning",
+  "skill_cooking",
+  "skill_washing",
+  "skill_ironing",
+  "col_break_skills",
+  "skill_baby_sitting",
+  "skill_children_care",
+  "skill_arabic_cooking",
+  "skill_elderly_care",
+  "skill_driving",
+  "skill_sewing",
+  "coc_exam_sec",
+  "coc_status",
+  "exam_date",
+  "additional_info_sec",
+  "children",
+  "city",
+  "country",
+  "col_break_additional",
+  "region",
+  "sub_region",
+  "leaving_town",
+  "alternate_phone",
+  "email",
+  "remarks",
+  "medical_remarks",
+  "fees_sec",
+  "fee_required",
+  "fee_type",
+  "fee_direction",
+  "fee_amount_col",
+  "registration_fee_amount",
+  "fee_currency",
+  "fee_status_sec",
+  "fee_status",
+  "fee_payment_date",
+  "fee_status_col",
+  "fee_transaction",
+  "fee_notes",
+  "fee_log_sec",
+  "fee_log",
+  "lifecycle_sec",
+  "status",
+  "active_placement",
+  "cycle_number"
+ ],
+ "fields": [
+  {
+   "fieldname": "identity_sec",
+   "fieldtype": "Section Break",
+   "label": "Identity (Draft floor)"
+  },
+  {
+   "default": "Standard",
+   "fieldname": "entry_track",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Entry Track",
+   "options": "Standard\nMuayena",
+   "reqd": 1
+  },
+  {
+   "fieldname": "first_name",
+   "fieldtype": "Data",
+   "label": "First Name"
+  },
+  {
+   "fieldname": "middle_name",
+   "fieldtype": "Data",
+   "label": "Middle Name"
+  },
+  {
+   "fieldname": "last_name",
+   "fieldtype": "Data",
+   "label": "Last Name"
+  },
+  {
+   "fieldname": "full_name",
+   "fieldtype": "Data",
+   "in_global_search": 1,
+   "in_list_view": 1,
+   "label": "Name",
+   "description": "Auto-filled from First/Middle/Last Name if left blank."
+  },
+  {
+   "fieldname": "gender",
+   "fieldtype": "Select",
+   "label": "Gender",
+   "options": "\nFemale\nMale\nOther"
+  },
+  {
+   "fieldname": "nationality",
+   "fieldtype": "Link",
+   "label": "Nationality",
+   "options": "Country"
+  },
+  {
+   "fieldname": "col_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Phone",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Small Text",
+   "label": "Address"
+  },
+  {
+   "fieldname": "date_of_birth",
+   "fieldtype": "Date",
+   "label": "Date of Birth"
+  },
+  {
+   "description": "Computed from Date of Birth -- read-only.",
+   "fieldname": "age",
+   "fieldtype": "Int",
+   "label": "Age",
+   "read_only": 1
+  },
+  {
+   "fieldname": "height",
+   "fieldtype": "Data",
+   "label": "Height"
+  },
+  {
+   "fieldname": "weight",
+   "fieldtype": "Data",
+   "label": "Weight"
+  },
+  {
+   "fieldname": "complexion",
+   "fieldtype": "Select",
+   "label": "Complexion",
+   "options": "\nFAIR\nMEDIUM\nDARK"
+  },
+  {
+   "fieldname": "photo_full_body",
+   "fieldtype": "Attach Image",
+   "label": "Full Body Photo"
+  },
+  {
+   "fieldname": "registration_sec",
+   "fieldtype": "Section Break",
+   "label": "Registration (Standard: full floor / Muayena: not required)"
+  },
+  {
+   "fieldname": "national_id",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "National ID"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "labor_id",
+   "fieldtype": "Data",
+   "label": "Labor ID"
+  },
+  {
+   "fieldname": "destination_country",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Destination Country",
+   "options": "Country"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "religion",
+   "fieldtype": "Select",
+   "label": "Religion",
+   "options": "\nMuslim\nOrthodox\nProtestant\nCatholic\nOther"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "marital_status",
+   "fieldtype": "Select",
+   "label": "Marital Status",
+   "options": "\nSingle\nMarried\nDivorced\nWidowed"
+  },
+  {
+   "fieldname": "col_break_registration",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "target_job",
+   "fieldtype": "Data",
+   "label": "Target Job"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "education",
+   "fieldtype": "Select",
+   "label": "Education",
+   "options": "\nHigh School\nAssociate Degree\nBachelor's Degree\nMaster's Degree\nDoctorate\nOther"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "salary_amount",
+   "fieldtype": "Currency",
+   "label": "Expected Salary"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "salary_currency",
+   "fieldtype": "Select",
+   "label": "Salary Currency",
+   "options": "\nSAR\nKWD\nUSD\nETB\nAED\nQAR"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "emergency_contact_name",
+   "fieldtype": "Data",
+   "label": "Emergency Contact Name"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "emergency_contact_phone",
+   "fieldtype": "Data",
+   "label": "Emergency Contact Phone",
+   "options": "Phone"
+  },
+  {
+   "depends_on": "eval:doc.entry_track == 'Standard'",
+   "fieldname": "emergency_contact_address",
+   "fieldtype": "Small Text",
+   "label": "Emergency Contact Address"
+  },
+  {
+   "fieldname": "passport_sec",
+   "fieldtype": "Section Break",
+   "label": "Passport (required for Registered, both tracks)"
+  },
+  {
+   "fieldname": "passport_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Passport Number"
+  },
+  {
+   "description": "Auto-derived from the passport's printed issue date, or (if absent) from Expiry minus 5 years, ONLY when left blank -- editable so a wrong derivation (e.g. a non-5-year passport) can be corrected by hand and will stick.",
+   "fieldname": "passport_issue_date",
+   "fieldtype": "Date",
+   "label": "Passport Issue Date"
+  },
+  {
+   "fieldname": "passport_expiry_date",
+   "fieldtype": "Date",
+   "label": "Passport Expiry Date"
+  },
+  {
+   "fieldname": "col_break_passport",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "passport_issue_place",
+   "fieldtype": "Data",
+   "label": "Passport Issue Place"
+  },
+  {
+   "fieldname": "passport_scan",
+   "fieldtype": "Attach",
+   "label": "Passport Scan"
+  },
+  {
+   "fieldname": "photograph",
+   "fieldtype": "Attach Image",
+   "label": "Photograph"
+  },
+  {
+   "default": "0",
+   "description": "Set automatically when passport OCR was low-confidence (a checksum failed, a visual-only read, or a re-uploaded scan conflicting with existing data). Staff should verify the passport fields and clear this.",
+   "fieldname": "needs_passport_review",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Needs Passport Review"
+  },
+  {
+   "fieldname": "medical_sec",
+   "fieldtype": "Section Break",
+   "label": "Medical"
+  },
+  {
+   "default": "Pending",
+   "description": "Informational only — NOT required/gated at Registration (2026-08-29 correction). The real medical fitness gate happens post-contract on Placement.medical_selected_status (Selected -> Processing).",
+   "fieldname": "medical_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Medical Status",
+   "options": "Pending\nFIT\nUNFIT"
+  },
+  {
+   "fieldname": "col_break_medical",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "medical_issue_date",
+   "fieldtype": "Date",
+   "label": "Medical Issue Date"
+  },
+  {
+   "fieldname": "medical_expiry_date",
+   "fieldtype": "Date",
+   "label": "Medical Expiry Date"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "education_experience_sec",
+   "fieldtype": "Section Break",
+   "label": "Education & Experience (optional detail)"
+  },
+  {
+   "fieldname": "institution",
+   "fieldtype": "Data",
+   "label": "Institution"
+  },
+  {
+   "fieldname": "graduation_year",
+   "fieldtype": "Int",
+   "label": "Graduation Year"
+  },
+  {
+   "fieldname": "english_level",
+   "fieldtype": "Select",
+   "label": "English Level",
+   "options": "\nNone\nBasic\nGood\nFluent"
+  },
+  {
+   "fieldname": "arabic_level",
+   "fieldtype": "Select",
+   "label": "Arabic Level",
+   "options": "\nNone\nBasic\nGood\nFluent"
+  },
+  {
+   "fieldname": "col_break_edu",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "current_employer",
+   "fieldtype": "Data",
+   "label": "Current / Last Employer"
+  },
+  {
+   "fieldname": "years_of_experience",
+   "fieldtype": "Int",
+   "label": "Years of Experience"
+  },
+  {
+   "fieldname": "experience_country",
+   "fieldtype": "Data",
+   "label": "Experience Country"
+  },
+  {
+   "fieldname": "experience_period",
+   "fieldtype": "Data",
+   "label": "Experience Period"
+  },
+  {
+   "fieldname": "education_remarks",
+   "fieldtype": "Small Text",
+   "label": "Education Remarks"
+  },
+  {
+   "description": "Short candidate self-introduction / skills demonstration video, captured at registration and shown to agencies in the portal candidate detail view.",
+   "fieldname": "experience_video",
+   "fieldtype": "Attach",
+   "label": "Experience Video"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "skills_sec",
+   "fieldtype": "Section Break",
+   "label": "Skills"
+  },
+  {
+   "fieldname": "skill_cleaning",
+   "fieldtype": "Check",
+   "label": "Cleaning"
+  },
+  {
+   "fieldname": "skill_cooking",
+   "fieldtype": "Check",
+   "label": "Cooking"
+  },
+  {
+   "fieldname": "skill_washing",
+   "fieldtype": "Check",
+   "label": "Washing"
+  },
+  {
+   "fieldname": "skill_ironing",
+   "fieldtype": "Check",
+   "label": "Ironing"
+  },
+  {
+   "fieldname": "col_break_skills",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "skill_baby_sitting",
+   "fieldtype": "Check",
+   "label": "Baby Sitting"
+  },
+  {
+   "fieldname": "skill_children_care",
+   "fieldtype": "Check",
+   "label": "Children Care"
+  },
+  {
+   "fieldname": "skill_arabic_cooking",
+   "fieldtype": "Check",
+   "label": "Arabic Cooking"
+  },
+  {
+   "fieldname": "skill_elderly_care",
+   "fieldtype": "Check",
+   "label": "Elderly Care"
+  },
+  {
+   "fieldname": "skill_driving",
+   "fieldtype": "Check",
+   "label": "Driving"
+  },
+  {
+   "fieldname": "skill_sewing",
+   "fieldtype": "Check",
+   "label": "Sewing"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "coc_exam_sec",
+   "fieldtype": "Section Break",
+   "label": "COC & Exam"
+  },
+  {
+   "fieldname": "coc_status",
+   "fieldtype": "Select",
+   "label": "COC Status",
+   "options": "\nPending\nIssued\nNot Started"
+  },
+  {
+   "fieldname": "exam_date",
+   "fieldtype": "Date",
+   "label": "Exam Date"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "additional_info_sec",
+   "fieldtype": "Section Break",
+   "label": "Additional Info"
+  },
+  {
+   "fieldname": "children",
+   "fieldtype": "Int",
+   "label": "Number of Children"
+  },
+  {
+   "fieldname": "city",
+   "fieldtype": "Data",
+   "label": "City"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Data",
+   "label": "Country of Residence"
+  },
+  {
+   "fieldname": "col_break_additional",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "label": "Region"
+  },
+  {
+   "fieldname": "sub_region",
+   "fieldtype": "Data",
+   "label": "Sub Region"
+  },
+  {
+   "fieldname": "leaving_town",
+   "fieldtype": "Data",
+   "label": "Leaving Town"
+  },
+  {
+   "fieldname": "alternate_phone",
+   "fieldtype": "Data",
+   "label": "Alternate Phone",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "medical_remarks",
+   "fieldtype": "Small Text",
+   "label": "Medical Remarks"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "fees_sec",
+   "fieldtype": "Section Break",
+   "label": "Registration Fee"
+  },
+  {
+   "description": "Toggle on only if this applicant owes/receives a registration-related fee. Everything below stays hidden until this is checked.",
+   "fieldname": "fee_required",
+   "fieldtype": "Check",
+   "label": "Fee Required"
+  },
+  {
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "fee_type",
+   "fieldtype": "Select",
+   "label": "Fee Type",
+   "options": "Registration Fee\nProcessing Fee\nVisa Fee\nOther"
+  },
+  {
+   "default": "Income",
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "fee_direction",
+   "fieldtype": "Select",
+   "label": "Fee Direction",
+   "options": "Income\nExpense"
+  },
+  {
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "fee_amount_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "registration_fee_amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "options": "fee_currency"
+  },
+  {
+   "default": "ETB",
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "fee_currency",
+   "fieldtype": "Select",
+   "label": "Currency",
+   "options": "ETB\nSAR\nKWD\nUSD\nAED\nQAR"
+  },
+  {
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "fee_status_sec",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "Pending",
+   "depends_on": "eval:doc.fee_required",
+   "description": "Set to Paid to log this into the Finance ledger (Applicant Transaction) -- happens automatically on save, or use the Log Fee button.",
+   "fieldname": "fee_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Fee Status",
+   "options": "Pending\nPaid\nExpired\nRefunded"
+  },
+  {
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "fee_payment_date",
+   "fieldtype": "Date",
+   "label": "Payment Date"
+  },
+  {
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "fee_status_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.fee_required",
+   "description": "Set automatically once this fee has been logged into the Finance ledger -- read-only, links to the actual Applicant Transaction row.",
+   "fieldname": "fee_transaction",
+   "fieldtype": "Link",
+   "label": "Ledger Entry",
+   "options": "Applicant Transaction",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.fee_required",
+   "fieldname": "fee_notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "collapsible": 1,
+   "description": "For anything beyond the single Registration Fee above -- as many income/expense rows as needed. Each row is auto-logged to the Finance ledger as a Pending Applicant Transaction on save, where Finance approves/rejects/voids it; this row's Status mirrors that outcome back.",
+   "fieldname": "fee_log_sec",
+   "fieldtype": "Section Break",
+   "label": "Income / Expense Log"
+  },
+  {
+   "fieldname": "fee_log",
+   "fieldtype": "Table",
+   "label": "Entries",
+   "options": "Applicant Fee Log"
+  },
+  {
+   "fieldname": "lifecycle_sec",
+   "fieldtype": "Section Break",
+   "label": "Lifecycle"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nRegistered\nCV Generated\nCancelled",
+   "read_only": 1
+  },
+  {
+   "description": "The global exclusivity lock (Part A.2 Stage 4). Set only by portal_api.select_candidate() or the Step 4 contract-upload path — never editable directly.",
+   "fieldname": "active_placement",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Active Placement",
+   "options": "Placement",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "description": "Increments only on a genuine regression to Draft/Registered from an already-completed state (Registered, CV Generated, Cancelled) -- never on a plain edit. Set by state_machine's TRANSITION_SIDE_EFFECTS, never editable directly.",
+   "fieldname": "cycle_number",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Cycle Number",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-05 11:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Applicant",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Finance Manager"
+  },
+  {
+   "read": 1,
+   "role": "Clearance Officer"
+  },
+  {
+   "read": 1,
+   "role": "Medical Officer"
+  },
+  {
+   "read": 1,
+   "role": "Complaint Manager"
+  },
+  {
+   "read": 1,
+   "role": "Communication Manager"
+  },
+  {
+   "read": 1,
+   "role": "Saudi LMIS"
+  },
+  {
+   "read": 1,
+   "role": "Saudi Taeshir"
+  },
+  {
+   "read": 1,
+   "role": "Saudi Embassy"
+  },
+  {
+   "read": 1,
+   "role": "Kuwait LMIS"
+  },
+  {
+   "read": 1,
+   "role": "Kuwait Telesign"
+  },
+  {
+   "read": 1,
+   "role": "Kuwait Embassy"
+  }
+ ],
+ "search_fields": "full_name,passport_number,national_id,phone,destination_country",
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "full_name",
+ "track_changes": 1
+}

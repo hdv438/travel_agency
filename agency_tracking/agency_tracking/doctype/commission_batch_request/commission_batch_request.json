@@ -1,0 +1,196 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "CBR-.#####",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "contractor",
+  "destination_country",
+  "col_break_cbr",
+  "status",
+  "total_amount_birr",
+  "requested_advance_amount",
+  "items_sec",
+  "items",
+  "settlement_sec",
+  "settlement_reference",
+  "advance_amount",
+  "advance_reference",
+  "advance_received_on",
+  "write_off_amount",
+  "write_off_reason",
+  "write_off_transaction",
+  "balance_due_birr",
+  "settled_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "contractor",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Contractor",
+   "options": "Contractor",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "destination_country",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Destination Country",
+   "options": "Country",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_cbr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nSent\nPartially Settled\nSettled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_amount_birr",
+   "fieldtype": "Currency",
+   "label": "Total (Birr)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "requested_advance_amount",
+   "fieldtype": "Currency",
+   "label": "Requested Advance (Birr)",
+   "description": "An up-front amount the agency is asked to pay ASAP when the batch is created, ahead of settling the whole total. Informational -- what actually arrives is recorded in Advance Received."
+  },
+  {
+   "fieldname": "items_sec",
+   "fieldtype": "Section Break",
+   "label": "Commission Items"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Commission Batch Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "settlement_sec",
+   "fieldtype": "Section Break",
+   "label": "Settlement"
+  },
+  {
+   "fieldname": "settlement_reference",
+   "fieldtype": "Data",
+   "label": "Settlement Reference"
+  },
+  {
+   "fieldname": "advance_amount",
+   "fieldtype": "Currency",
+   "label": "Advance Received (Birr)",
+   "description": "Partial amount actually received from the foreign agency against this batch, when they remit less than the full requested total. Leave 0 for a full settlement."
+  },
+  {
+   "fieldname": "advance_reference",
+   "fieldtype": "Data",
+   "label": "Advance Reference",
+   "description": "Bank/transfer reference for the advance payment."
+  },
+  {
+   "fieldname": "advance_received_on",
+   "fieldtype": "Date",
+   "label": "Advance Received On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "write_off_amount",
+   "fieldtype": "Currency",
+   "label": "Write-off / Discount (Birr)",
+   "read_only": 1,
+   "description": "Agreed discount the agency doesn't pay (recorded as an Expense). Set via finance_api.write_off_batch. Reduces balance due and, once advance + write-off cover the total, settles the batch."
+  },
+  {
+   "fieldname": "write_off_reason",
+   "fieldtype": "Small Text",
+   "label": "Write-off Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "write_off_transaction",
+   "fieldtype": "Link",
+   "label": "Write-off Expense Transaction",
+   "options": "Applicant Transaction",
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_due_birr",
+   "fieldtype": "Currency",
+   "label": "Balance Due (Birr)",
+   "read_only": 1,
+   "description": "Total minus advance received minus write-off. Auto-computed."
+  },
+  {
+   "fieldname": "settled_on",
+   "fieldtype": "Date",
+   "label": "Settled On",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Commission Batch Request",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "contractor,destination_country,status",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,102 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "CHT-.#####",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "thread_type",
+  "contractor",
+  "col_break_thread",
+  "context_type",
+  "context_reference",
+  "last_message_at",
+  "participants_sec",
+  "participants"
+ ],
+ "fields": [
+  {
+   "description": "Agency: exactly the owning Contractor's portal user + their routed Communication Manager, never more (addendum: \"adding participants to an agency thread stays restricted\"). Internal: open staff-to-staff, no restriction.",
+   "fieldname": "thread_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Thread Type",
+   "options": "Agency\nInternal",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Set only for Agency threads — the isolation boundary. An agency-facing query must always filter by this, never just by participants, so two threads can never be confused across agencies even by a bug in participant handling.",
+   "fieldname": "contractor",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Contractor",
+   "options": "Contractor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_thread",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "General",
+   "fieldname": "context_type",
+   "fieldtype": "Select",
+   "label": "Context Type",
+   "options": "General\nPlacement\nComplaint",
+   "read_only": 1
+  },
+  {
+   "description": "Name of the referenced Placement/Complaint when context_type isn't General. Read access to the referenced record still goes through that record's own permission check (addendum: \"the mention is a link, not a permission grant\") — same rule applied here to thread context as to message @mentions.",
+   "fieldname": "context_reference",
+   "fieldtype": "Data",
+   "label": "Context Reference",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_message_at",
+   "fieldtype": "Datetime",
+   "label": "Last Message At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "participants_sec",
+   "fieldtype": "Section Break",
+   "label": "Participants"
+  },
+  {
+   "fieldname": "participants",
+   "fieldtype": "Table",
+   "label": "Participants",
+   "options": "Chat Thread Participant",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Chat Thread",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "thread_type,contractor,context_type",
+ "sort_field": "last_message_at",
+ "sort_order": "DESC",
+ "states": []
+}

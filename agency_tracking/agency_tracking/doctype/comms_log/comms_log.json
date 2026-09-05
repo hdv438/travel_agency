@@ -1,0 +1,130 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "CML-.#####",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "recipient",
+  "channel",
+  "template",
+  "col_break_cml",
+  "status",
+  "attempts",
+  "last_attempt_at",
+  "content_sec",
+  "context",
+  "error"
+ ],
+ "fields": [
+  {
+   "fieldname": "recipient",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Recipient",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "channel",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Channel",
+   "options": "Push\nWhatsApp",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "template",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Template",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_cml",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nSent\nFailed",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "attempts",
+   "fieldtype": "Int",
+   "label": "Attempts",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_attempt_at",
+   "fieldtype": "Datetime",
+   "label": "Last Attempt At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "content_sec",
+   "fieldtype": "Section Break",
+   "label": "Content"
+  },
+  {
+   "fieldname": "context",
+   "fieldtype": "JSON",
+   "label": "Context",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Error",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Comms Log",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "recipient,channel,status",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

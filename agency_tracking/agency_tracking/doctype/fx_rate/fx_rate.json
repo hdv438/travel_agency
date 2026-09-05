@@ -1,0 +1,90 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "currency",
+  "rate_date",
+  "rate_to_birr"
+ ],
+ "fields": [
+  {
+   "description": "ETB isn't listed -- it's Birr itself, always 1:1, hardcoded in finance_engine.get_fx_rate rather than recorded here.",
+   "fieldname": "currency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Currency",
+   "options": "SAR\nKWD\nUSD\nAED\nQAR",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rate_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Rate Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rate_to_birr",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Rate to Birr",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "FX Rate",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "currency,rate_date",
+ "sort_field": "rate_date",
+ "sort_order": "DESC",
+ "states": []
+}

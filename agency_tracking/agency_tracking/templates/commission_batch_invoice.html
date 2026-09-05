@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+	body { font-family: sans-serif; font-size: 12px; }
+	h1 { font-size: 18px; }
+	table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+	th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+	th { background: #f0f0f0; }
+	.total { font-weight: bold; text-align: right; margin-top: 8px; }
+</style>
+</head>
+<body>
+	<h1>Commission Invoice — {{ batch.name }}</h1>
+	<p>Agency: {{ contractor_name }}<br>Destination: {{ batch.destination_country }}<br>Status: {{ batch.status }}</p>
+	<table>
+		<thead>
+			<tr><th>Applicant</th><th>Amount (Birr)</th><th>Status</th></tr>
+		</thead>
+		<tbody>
+			{% for row in rows %}
+			<tr>
+				<td>{{ row.full_name }}</td>
+				<td>{{ "%.2f"|format(row.amount_birr or 0) }}</td>
+				<td>{{ row.status }}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+	<p class="total">Total: {{ "%.2f"|format(batch.total_amount_birr or 0) }} Birr</p>
+</body>
+</html>

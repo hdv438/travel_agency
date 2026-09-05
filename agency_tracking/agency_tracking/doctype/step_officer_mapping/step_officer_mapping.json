@@ -1,0 +1,81 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:step_type",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "step_type",
+  "default_officer"
+ ],
+ "fields": [
+  {
+   "description": "Matches Corridor Step.step_type (e.g. \"LMIS Clearance\", \"Taeshir\").",
+   "fieldname": "step_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Step Type",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "default_officer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Default Officer",
+   "options": "User",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agency Tracking",
+ "name": "Step Officer Mapping",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Admin",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "step_type,default_officer",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
