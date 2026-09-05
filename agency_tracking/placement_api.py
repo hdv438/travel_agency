@@ -245,8 +245,20 @@ def advance_placement(placement_name=None, new_status=None, override_reason=None
 	if not placement_name or not new_status:
 		frappe.throw("Both placement_name and new_status are required.", frappe.ValidationError)
 
+	if not frappe.db.exists("Placement", placement_name):
+		frappe.throw(f"Placement {placement_name} not found.", frappe.DoesNotExistError)
 	placement = frappe.get_doc("Placement", placement_name)
-	if not placement.has_permission("write"):
+	# S-1 (2026-09-05): lifecycle advance is management, OR the officer actually assigned to THIS
+	# placement's current stage (holds an open ToDo on it) -- not every role that happens to have
+	# Placement write (which included Ticketer/Contract Parser, letting them advance any placement's
+	# whole lifecycle). The gates still enforce the stage conditions on top of this.
+	from agency_tracking.finance_engine import is_assigned_to_placement
+
+	if not (
+		frappe.session.user == "Administrator"
+		or ({"Manager", "Admin", "System Manager"} & set(frappe.get_roles()))
+		or is_assigned_to_placement(frappe.session.user, placement_name)
+	):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 
 	return transition(
@@ -386,9 +398,9 @@ def update_placement_parsed_fields(placement_name=None, **data):
 def get_placement(placement_name=None, **kwargs):
 	placement_name = placement_name or kwargs.get("name") or kwargs.get("placement")
 	if not placement_name:
-		placement_name = frappe.db.get_value("Placement", {}, "name")
-	if not placement_name:
 		frappe.throw("placement_name is required.", frappe.ValidationError)
+	if not frappe.db.exists("Placement", placement_name):
+		frappe.throw(f"Placement {placement_name} not found.", frappe.DoesNotExistError)
 	doc = frappe.get_doc("Placement", placement_name)
 	if not doc.has_permission("read"):
 		frappe.throw("Not permitted.", frappe.PermissionError)

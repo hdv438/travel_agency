@@ -32,14 +32,19 @@ def get_current_user():
 	user = frappe.session.user
 	if user == "Guest":
 		return None
-	roles = frappe.get_roles(user)
+	raw_roles = set(frappe.get_roles(user))
+	is_internal_staff = user == "Administrator" or bool(INTERNAL_STAFF_ROLES & raw_roles)
+
+	# Only expose THIS app's own roles -- never Frappe's ~30 built-ins (All, Guest, Desk User,
+	# Website Manager, Blogger, ...), which are noise to the UI. And an admin / super-user holds
+	# every role, so collapse that to a single general "Admin" label instead of a cluttered list of
+	# all 17 (2026-09-05). Everyone else shows exactly the app roles they actually hold.
+	is_admin = user == "Administrator" or bool({"Admin", "System Manager"} & raw_roles)
+	roles = ["Admin"] if is_admin else [r for r in APP_ROLES if r in raw_roles]
+
 	# Contractor context so a Foreign Agency SPA knows its own tenant identity directly from the
-	# session bootstrap — no need to abuse an unrelated op (e.g. create_agency_thread) to discover
-	# it. Server-derived from the linked User only; the frontend never asserts its own Contractor.
-	# None for internal staff and unlinked users. is_internal_staff lets the SPA branch portal vs
-	# Desk-style views without re-deriving role sets client-side.
+	# session bootstrap. Server-derived from the linked User only. None for internal staff / unlinked.
 	contractor = frappe.db.get_value("Contractor", {"user": user}, "name")
-	is_internal_staff = user == "Administrator" or bool(INTERNAL_STAFF_ROLES & set(roles))
 	return {
 		"user": user,
 		"full_name": frappe.db.get_value("User", user, "full_name"),

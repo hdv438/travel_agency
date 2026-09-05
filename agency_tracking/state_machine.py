@@ -298,11 +298,14 @@ def medical_2_gate(placement):
 
 
 def passport_valid_for_departure(placement):
-	"""Audit G-016: a passport valid at registration can lapse before departure (only medical was
-	re-checked this late). Block Departed if the applicant's passport has expired."""
+	"""Audit G-016 & BR-02: international travel and immigration regulations require that the
+	passport has at least 6 months (180 days) remaining validity before flight departure."""
 	expiry = frappe.db.get_value("Applicant", placement.applicant, "passport_expiry_date")
-	if expiry and get_datetime(expiry).date() < frappe.utils.getdate():
-		return f"passport expired on {expiry}; it must be renewed before departure."
+	if expiry:
+		expiry_date = get_datetime(expiry).date()
+		min_validity = frappe.utils.add_months(frappe.utils.getdate(), 6)
+		if expiry_date < min_validity:
+			return f"passport expires on {expiry} (less than 6 months validity remains); it must be renewed before departure."
 	return True
 
 

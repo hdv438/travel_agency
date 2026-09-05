@@ -20,9 +20,17 @@ PORTAL_FIELDS = [
 	"gender",
 	"nationality",
 	"date_of_birth",
+	"age",
 	"target_job",
 	"education",
 	"photograph",
+	"photo_full_body",
+	"destination_country",
+	"religion",
+	"marital_status",
+	"experience_country",
+	"years_of_experience",
+	"experience_video",
 ]
 
 # Richer, still strictly non-PII profile an agency may pull for a SINGLE candidate it is allowed
@@ -119,18 +127,28 @@ PORTAL_PLACEMENT_FIELDS = [
 
 
 def _get_contractor_for_session_user(contractor_override=None):
+	is_internal = frappe.session.user == "Administrator" or bool(
+		{"Manager", "Admin", "System Manager"} & set(frappe.get_roles())
+	)
+	if "Foreign Agency" in frappe.get_roles() and not is_internal:
+		# Strictly tenant-scoped: Foreign Agency callers MUST ONLY ever access their own linked Contractor.
+		contractor_name = frappe.db.get_value("Contractor", {"user": frappe.session.user}, "name")
+		if not contractor_name:
+			frappe.throw("Foreign agency user is not linked to any Contractor.", frappe.PermissionError)
+		if contractor_override and contractor_override != contractor_name:
+			frappe.throw("Not permitted to access data for another agency.", frappe.PermissionError)
+		return frappe.get_doc("Contractor", contractor_name)
+
 	if contractor_override:
 		return frappe.get_doc("Contractor", contractor_override)
-	if "Foreign Agency" in frappe.get_roles():
-		contractor_name = frappe.db.get_value("Contractor", {"user": frappe.session.user}, "name")
-		if contractor_name:
-			return frappe.get_doc("Contractor", contractor_name)
-	if frappe.session.user == "Administrator" or ({"Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
-		first = frappe.db.get_value("Contractor", {}, "name")
-		if first:
-			return frappe.get_doc("Contractor", first)
-		frappe.throw("No Contractor record found in system.", frappe.ValidationError)
+
+	if is_internal:
+		frappe.throw(
+			"A contractor must be specified for this operation (pass contractor_name / contractor).",
+			frappe.ValidationError,
+		)
 	frappe.throw("Not permitted.", frappe.PermissionError)
+
 
 
 def _is_internal_placement_reader():
@@ -181,9 +199,17 @@ def list_portal_candidates(target_job=None, gender=None, **kwargs):
 		# the frontend) so a placed/reserved candidate is never returned to an unrelated agency.
 		"active_placement": ["is", "not set"],
 	}
-	if "Foreign Agency" in frappe.get_roles():
+	is_internal = frappe.session.user == "Administrator" or bool(
+		{"Manager", "Admin", "System Manager"} & set(frappe.get_roles())
+	)
+	if "Foreign Agency" in frappe.get_roles() and not is_internal:
 		contractor = _get_contractor_for_session_user()
 		filters["destination_country"] = contractor.country
+	elif kwargs.get("contractor_name") or kwargs.get("contractor"):
+		contractor = _get_contractor_for_session_user(contractor_override=kwargs.get("contractor_name") or kwargs.get("contractor"))
+		filters["destination_country"] = contractor.country
+	elif kwargs.get("destination_country"):
+		filters["destination_country"] = kwargs.get("destination_country")
 	if target_job:
 		filters["target_job"] = target_job
 	if gender:
@@ -197,20 +223,12 @@ def list_portal_candidates(target_job=None, gender=None, **kwargs):
 	)
 
 
-@frappe.whitelist()
-def get_candidate_detail(applicant_name=None, **kwargs):
-	"""Rich, non-PII profile for a single catalog candidate (experience video, skills matrix,
-	education/experience, physical attributes, salary expectation — PORTAL_DETAIL_FIELDS).
-
-	Same tenant/country scoping as the marketplace: a Foreign Agency may only open a candidate
-	that is currently available in its OWN destination country (Standard, CV Generated, not yet
-	locked), OR one whose active Placement it already owns (so it can keep viewing a worker it
-	selected). Any other candidate — a different country, or one placed by another agency — is a
-	bare 403, never a partial record. Internal staff (and Registrar) may view any candidate."""
-	applicant_name = applicant_name or kwargs.get("applicant") or kwargs.get("name")
-	if not applicant_name:
-		frappe.throw("applicant_name is required.", frappe.ValidationError)
-
+def _assert_can_view_candidate(applicant_name):
+	"""Shared permission gate for viewing a single portal candidate's detail OR photo. A Foreign
+	Agency may only view a candidate currently available in its OWN destination country (Standard,
+	CV Generated, not yet locked), OR one whose active Placement it already owns. Any other
+	candidate is a bare 403. Internal staff / Registrar / management may view any. Returns the
+	candidate's scope row."""
 	allowed_roles = {"Foreign Agency", "Manager", "Admin", "System Manager", "Registrar"}
 	if frappe.session.user != "Administrator" and not (allowed_roles & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
@@ -237,8 +255,62 @@ def get_candidate_detail(applicant_name=None, **kwargs):
 		)
 		if not (available or owns_placement):
 			frappe.throw("Not permitted.", frappe.PermissionError)
+	return scope
 
+
+@frappe.whitelist()
+def get_candidate_detail(applicant_name=None, **kwargs):
+	"""Rich, non-PII profile for a single catalog candidate (experience video, skills matrix,
+	education/experience, physical attributes, salary expectation — PORTAL_DETAIL_FIELDS).
+
+	Same tenant/country scoping as the marketplace (see _assert_can_view_candidate)."""
+	applicant_name = applicant_name or kwargs.get("applicant") or kwargs.get("name")
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
+	_assert_can_view_candidate(applicant_name)
 	return frappe.db.get_value("Applicant", applicant_name, PORTAL_DETAIL_FIELDS, as_dict=True)
+
+
+# The ONLY candidate images an agency may load. Sensitive files (passport_scan, contract, visa) are
+# never served here.
+CANDIDATE_PHOTO_KINDS = {"photograph", "photo_full_body"}
+
+
+@frappe.whitelist()
+def get_candidate_photo(applicant_name=None, kind="photograph", **kwargs):
+	"""Serve a portal candidate's marketing photo to an agency allowed to view that candidate (same
+	gate as get_candidate_detail). Agencies can't read the underlying (private) File docs directly,
+	so this is their only path to these images -- and it exposes ONLY photograph / photo_full_body,
+	never passport/contract/visa files.
+
+	Storage-agnostic, so it's correct both now and after the R2 cutover: a local Frappe file is
+	streamed inline; a photo already offloaded to R2 (an absolute public URL) is served via a
+	redirect. Missing photo -> 404."""
+	applicant_name = applicant_name or kwargs.get("applicant") or kwargs.get("name")
+	kind = kind if kind in CANDIDATE_PHOTO_KINDS else "photograph"
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
+	_assert_can_view_candidate(applicant_name)
+
+	value = frappe.db.get_value("Applicant", applicant_name, kind)
+	if not value:
+		frappe.throw("No photo on file for this candidate.", frappe.DoesNotExistError)
+
+	# R2 / any absolute URL: send the browser (or the frontend proxy) straight to the public object.
+	if value.startswith("http://") or value.startswith("https://"):
+		frappe.local.response["type"] = "redirect"
+		frappe.local.response["location"] = value
+		return
+
+	# Local Frappe file: stream the bytes ourselves (the agency has no direct File read permission,
+	# but our own gate above already authorized this specific candidate's photo).
+	file_name = frappe.db.get_value("File", {"file_url": value}, "name")
+	if not file_name:
+		frappe.throw("Photo file not found.", frappe.DoesNotExistError)
+	file_doc = frappe.get_doc("File", file_name)
+	frappe.local.response.filename = file_doc.file_name
+	frappe.local.response.filecontent = file_doc.get_content()
+	frappe.local.response.type = "download"
 
 
 @frappe.whitelist()
@@ -316,7 +388,7 @@ def select_candidate(applicant_name=None, free_replacement_for_complaint=None, c
 
 
 @frappe.whitelist()
-def list_my_placements(status=None, limit_page_length=100, limit_start=0, order_by="modified desc", **kwargs):
+def list_my_placements(status=None, limit_page_length=100, limit_start=0, order_by="modified desc", contractor_name=None, **kwargs):
 	"""Foreign Agency's own placement read surface (backend-issues, multi-tenant audit).
 
 	placement_api.list_placements is internal-staff-only (Placement's doctype-level read grants
@@ -325,7 +397,7 @@ def list_my_placements(status=None, limit_page_length=100, limit_start=0, order_
 	(never from a caller-supplied contractor id) and returns ONLY that Contractor's placements,
 	limited to PORTAL_PLACEMENT_FIELDS. Unlinked Foreign Agency users 403 via
 	_get_contractor_for_session_user. Tenant isolation is enforced entirely server-side."""
-	contractor = _get_contractor_for_session_user()
+	contractor = _get_contractor_for_session_user(contractor_override=contractor_name or kwargs.get("contractor"))
 	filters = {"contractor": contractor.name}
 	if status:
 		filters["status"] = status
@@ -341,12 +413,12 @@ def list_my_placements(status=None, limit_page_length=100, limit_start=0, order_
 
 
 @frappe.whitelist()
-def list_my_wakala_requests():
+def list_my_wakala_requests(contractor_name=None, **kwargs):
 	"""New (2026-08-29): a Contractor-scoped list of every unpaid Wakala-bearing Embassy step
 	for their own placements — the page the watchdog/manual reminders (watchdogs.
 	wakala_reminder_watchdog) are actually pointing them at. Mirrors list_my_clearance_steps()'s
 	pattern for the internal-staff side."""
-	contractor = _get_contractor_for_session_user()
+	contractor = _get_contractor_for_session_user(contractor_override=contractor_name or kwargs.get("contractor"))
 	placement_names = frappe.get_all("Placement", filters={"contractor": contractor.name}, pluck="name")
 	if not placement_names:
 		return []

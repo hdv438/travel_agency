@@ -54,9 +54,9 @@ def trigger_wakala_reminder(clearance_step_name=None, **kwargs):
 	escape hatch alongside the automatic Fri/Sat/Sun watchdog."""
 	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
 	if not clearance_step_name:
-		clearance_step_name = frappe.db.get_value("Clearance Step", {"step_type": ["in", ["Embassy", "Kuwait Embassy"]]}, "name")
-	if not clearance_step_name:
 		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
+	if not frappe.db.exists("Clearance Step", clearance_step_name):
+		frappe.throw(f"Clearance Step {clearance_step_name} not found.", frappe.DoesNotExistError)
 	step = frappe.get_doc("Clearance Step", clearance_step_name)
 	if step.step_type not in ("Embassy", "Kuwait Embassy"):
 		frappe.throw("This is only meaningful for an Embassy clearance step.", frappe.ValidationError)

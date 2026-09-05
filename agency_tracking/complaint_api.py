@@ -19,13 +19,21 @@ def create_complaint(placement=None, description=None, worker_status_at_complain
 	their own placement; internal staff need some recognized staff role, but creation itself
 	isn't restricted the way resolution is."""
 	placement = placement or kwargs.get("placement_name")
+	applicant = kwargs.get("applicant") or kwargs.get("applicant_name")
+	if placement and not frappe.db.exists("Placement", placement) and frappe.db.exists("Applicant", placement):
+		applicant = placement
+		placement = None
+
+	if not placement and applicant:
+		placement = frappe.db.get_value("Placement", {"applicant": applicant}, "name", order_by="creation desc")
+
 	description = description or kwargs.get("details") or "General Complaint"
 	if worker_status_at_complaint not in ("Deployed", "Returned"):
 		worker_status_at_complaint = "Deployed"
 	if not placement or not frappe.db.exists("Placement", placement):
-		placement = frappe.db.get_value("Placement", {"status": ["in", ["Departed", "Processing", "Selected"]]}, "name") or frappe.db.get_value("Placement", {}, "name")
-	if not placement:
-		frappe.throw("placement is required.", frappe.ValidationError)
+		# No silent fallback to an arbitrary placement (2026-09-05): a complaint must name the real
+		# placement it's about, or it lands on a random worker.
+		frappe.throw("A valid placement linked to an applicant is required.", frappe.ValidationError)
 
 	linked_contractor = (
 		None
@@ -33,7 +41,7 @@ def create_complaint(placement=None, description=None, worker_status_at_complain
 		else frappe.db.get_value("Contractor", {"user": frappe.session.user}, "name")
 	)
 	placement_doc = frappe.get_doc("Placement", placement)
-	contractor_name = placement_doc.contractor or frappe.db.get_value("Contractor", {}, "name")
+	contractor_name = placement_doc.contractor
 
 	if linked_contractor:
 		if linked_contractor != placement_doc.contractor:
@@ -118,9 +126,7 @@ def acknowledge_complaint(complaint_name=None, **kwargs):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	complaint_name = complaint_name or kwargs.get("name")
 	if not complaint_name or not frappe.db.exists("Complaint", complaint_name):
-		complaint_name = frappe.db.get_value("Complaint", {"status": "New"}, "name") or frappe.db.get_value("Complaint", {}, "name")
-	if not complaint_name:
-		frappe.throw("complaint_name is required.", frappe.ValidationError)
+		frappe.throw("A valid complaint_name is required.", frappe.ValidationError)
 	complaint = frappe.get_doc("Complaint", complaint_name)
 	if complaint.status == "Unresolved":
 		return complaint.as_dict()
@@ -140,9 +146,7 @@ def resolve_complaint(complaint_name=None, new_status=None, resolution_notes=Non
 	new_status = new_status or kwargs.get("status") or "Resolved"
 	resolution_notes = resolution_notes or kwargs.get("remarks") or "Resolved by management"
 	if not complaint_name or not frappe.db.exists("Complaint", complaint_name):
-		complaint_name = frappe.db.get_value("Complaint", {"status": "Unresolved"}, "name") or frappe.db.get_value("Complaint", {}, "name")
-	if not complaint_name:
-		frappe.throw("complaint_name is required.", frappe.ValidationError)
+		frappe.throw("A valid complaint_name is required.", frappe.ValidationError)
 	if new_status not in TERMINAL_STATUSES:
 		frappe.throw(f"'{new_status}' is not a resolution outcome.", frappe.ValidationError)
 	if new_status == "Dismissed" and not resolution_notes:

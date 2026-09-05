@@ -150,9 +150,9 @@ def render_cv_pdf(applicant_name=None, **kwargs):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	applicant_name = applicant_name or kwargs.get("name") or kwargs.get("applicant")
 	if not applicant_name:
-		applicant_name = frappe.db.get_value("Applicant", {"status": "CV Generated"}, "name")
-	if not applicant_name:
 		frappe.throw("applicant_name is required.", frappe.ValidationError)
+	if not frappe.db.exists("Applicant", applicant_name):
+		frappe.throw(f"Applicant {applicant_name} not found.", frappe.DoesNotExistError)
 	applicant = frappe.get_doc("Applicant", applicant_name)
 	pdf_bytes = _render_cv_pdf(applicant)
 	frappe.response["filename"] = f"CV_{applicant_name}.pdf"

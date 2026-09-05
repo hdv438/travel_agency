@@ -126,6 +126,9 @@ permission_query_conditions = {
 	"Clearance Step": "agency_tracking.agency_tracking.doctype.clearance_step.clearance_step.get_permission_query_conditions",
 	"Applicant Transaction": "agency_tracking.agency_tracking.doctype.applicant_transaction.applicant_transaction.get_permission_query_conditions",
 	"Commission Batch Request": "agency_tracking.agency_tracking.doctype.commission_batch_request.commission_batch_request.get_permission_query_conditions",
+	# S-3: clearance-country roles see only their own cases (management + other internal roles unchanged).
+	"Placement": "agency_tracking.agency_tracking.doctype.placement.placement.get_permission_query_conditions",
+	"Applicant": "agency_tracking.agency_tracking.doctype.applicant.applicant.get_permission_query_conditions",
 }
 
 # DocType Class

@@ -8,3 +8,9 @@ __pycache__
 sample_*.pdf
 .venv
 *.egg-info/
+_verify_*.py
+_e2e.py
+audit_helper.py
+backend_schema_audit.json
+frontend_api_calls.json
+

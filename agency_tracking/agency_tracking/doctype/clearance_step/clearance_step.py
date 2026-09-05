@@ -19,6 +19,36 @@ CLEARANCE_ROLE_BY_STEP_TYPE = {
 	"Kuwait Embassy": "Kuwait Embassy",
 }
 
+CLEARANCE_COUNTRY_ROLES = set(CLEARANCE_ROLE_BY_STEP_TYPE.values())
+_MGMT_ROLES = {"Manager", "Admin", "System Manager", "Administrator"}
+
+
+def scoped_clearance_step_types(user=None):
+	"""S-3 row-scoping (2026-09-05): to which clearance step_types is a user's Placement/Applicant
+	visibility limited?
+
+	  None   -> full access (management, or any non-clearance app role -- Registrar, Contract Parser,
+	            Ticketer, Finance Manager, Complaint/Communication Manager, Medical Officer,
+	            Clearance Officer).
+	  [types]-> the user holds ONLY clearance-country role(s), so they see only placements/applicants
+	            that have a step of these types.
+	  []     -> no relevant app role -> nothing (defensive).
+	"""
+	if not user:
+		user = frappe.session.user
+	roles = set(frappe.get_roles(user))
+	if _MGMT_ROLES & roles:
+		return None
+	from agency_tracking.install import ROLES as APP_ROLES
+
+	app_roles = roles & set(APP_ROLES)
+	country = app_roles & CLEARANCE_COUNTRY_ROLES
+	if app_roles - country:  # holds a non-clearance app role -> full access
+		return None
+	if country:
+		return [st for st, role in CLEARANCE_ROLE_BY_STEP_TYPE.items() if role in country]
+	return []
+
 
 class ClearanceStep(Document):
 	def validate(self):

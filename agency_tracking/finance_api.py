@@ -211,10 +211,10 @@ def get_owed_commissions(contractor=None, destination_country=None, order="oldes
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	contractor = contractor or kwargs.get("contractor_name")
 	if not contractor:
-		contractor = frappe.db.get_value("Contractor", {}, "name")
-	if not destination_country and contractor:
+		frappe.throw("contractor is required.", frappe.ValidationError)
+	if not destination_country:
 		destination_country = frappe.db.get_value("Contractor", contractor, "country")
-	if not contractor or not destination_country:
+	if not destination_country:
 		return []
 	return list_owed_commissions(contractor, destination_country, order)
 
@@ -230,11 +230,11 @@ def create_commission_batch(contractor=None, destination_country=None, transacti
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	contractor = contractor or kwargs.get("contractor_name")
 	if not contractor:
-		contractor = frappe.db.get_value("Contractor", {}, "name")
-	if not destination_country and contractor:
+		frappe.throw("contractor is required.", frappe.ValidationError)
+	if not destination_country:
 		destination_country = frappe.db.get_value("Contractor", contractor, "country")
-	if not contractor or not destination_country:
-		frappe.throw("contractor and destination_country are required.", frappe.ValidationError)
+	if not destination_country:
+		frappe.throw("destination_country is required.", frappe.ValidationError)
 	if isinstance(transaction_names, str):
 		transaction_names = frappe.parse_json(transaction_names)
 	requested_advance_amount = requested_advance_amount if requested_advance_amount is not None else kwargs.get("requested_advance")
@@ -330,6 +330,23 @@ def get_commission_batch(batch_name=None, **kwargs):
 def settle_batch(batch_name, settlement_reference):
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
+	if not batch_name or not frappe.db.exists("Commission Batch Request", batch_name):
+		frappe.throw("A valid batch_name is required.", frappe.ValidationError)
+	batch = frappe.get_doc("Commission Batch Request", batch_name)
+	# Dual-authorization / Segregation of duties:
+	# An operational creator of the batch cannot be the sole approver/settler of large batches
+	# unless they are the Administrator or hold the Admin role.
+	if (
+		batch.owner == frappe.session.user
+		and frappe.session.user != "Administrator"
+		and "Admin" not in frappe.get_roles()
+		and flt(batch.total_amount_birr) > 100000
+	):
+		frappe.throw(
+			"Four-eyes principle violation: The creator of a commission batch exceeding 100,000 ETB "
+			"cannot be the sole settler. Another Finance Manager or Admin must settle this batch.",
+			frappe.PermissionError,
+		)
 	return settle_batch_request(batch_name, settlement_reference).as_dict()
 
 

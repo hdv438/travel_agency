@@ -6616,6 +6616,66 @@
           }
         ]
       }
+    },
+    "/api/method/agency_tracking.portal_api.get_candidate_photo": {
+      "post": {
+        "tags": [
+          "Portal (Foreign Agency)"
+        ],
+        "summary": "Get a candidate's photo (image)",
+        "description": "Serve a portal candidate's photograph/photo_full_body as an image to an agency allowed to view that candidate (same gate as get_candidate_detail). Agencies can't read the private File docs directly; passport/contract/visa are never served here. Local file streamed, R2 object redirected. Also callable via GET to back an <img src>. Returns image bytes.",
+        "x-roles": [
+          "Foreign Agency",
+          "Manager",
+          "Admin",
+          "System Manager",
+          "Registrar"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "produces": [
+          "image/jpeg",
+          "image/png",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "applicant_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "kind",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "enum": [
+              "photograph",
+              "photo_full_body"
+            ],
+            "description": "default photograph"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candidate photo (image bytes)"
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "404": {
+            "description": "No photo / candidate not found"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
     }
   },
   "definitions": {

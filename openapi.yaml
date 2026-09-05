@@ -1258,6 +1258,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StandardErrorResponse'
+  /api/method/agency_tracking.portal_api.get_candidate_photo:
+    post:
+      tags:
+      - 04 - Portal & Candidate Discovery
+      summary: Get Candidate Photo
+      description: 'Serve a portal candidate''s marketing photo (photograph or photo_full_body) as an image, to an agency allowed to view that candidate -- SAME permission gate as get_candidate_detail. Agencies cannot read the underlying (private) File docs directly, so this is their only path to these images; sensitive files (passport scan, contract, visa) are never served here. Storage-agnostic: a local Frappe file is streamed, a photo already offloaded to R2 is served via redirect to its public URL. Missing photo -> 404. Also callable via GET so it can back an <img src>. Returns image bytes, not JSON.
+
+
+**Authorized Roles:** Foreign Agency, Manager, Admin, System Manager, Registrar, Administrator'
+      operationId: get_candidate_photo
+      security:
+      - frappeSessionCookie: []
+        frappeCsrfToken: []
+      - frappeApiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                applicant_name:
+                  type: string
+                  description: 'Parameter: applicant_name'
+                kind:
+                  type: string
+                  enum: [photograph, photo_full_body]
+                  description: 'Which photo (default photograph)'
+              required:
+              - applicant_name
+            example:
+              applicant_name: '{{applicant_name}}'
+              kind: photograph
+      responses:
+        '200':
+          description: The candidate photo (image bytes)
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Permission Denied / Insufficient Role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
+        '404':
+          description: No photo / candidate not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardErrorResponse'
   /api/method/agency_tracking.portal_api.select_candidate:
     post:
       tags:

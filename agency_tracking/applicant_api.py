@@ -80,20 +80,29 @@ def _notify_management_of_ban_event(applicant_name, country, ban_name, event, re
 		)
 
 
+CORE_IDENTITY_FIELDS = frozenset({
+	"full_name",
+	"first_name",
+	"middle_name",
+	"last_name",
+	"passport_number",
+	"passport_expiry_date",
+	"date_of_birth",
+	"gender",
+	"destination_country",
+	"entry_track",
+	"nationality",
+})
+
+
 @frappe.whitelist()
 def update_applicant(applicant_name, override_ban=False, override_reason=None, **data):
 	"""Edit an Applicant still at Draft or Registered. Does not change status — use
 	register_applicant for that transition.
 
-	Two special cases handled here rather than in Applicant.validate() (both need to run
-	*before* the normal update, and the entry_track one needs its own transition() call --
-	see CLAUDE.md's absolute "no doc.status = X; doc.save()" rule, state_machine.py):
-
-	1. entry_track changing while Registered/CV Generated forces a regression to Draft first
-	   (old track still in place, so the lenient Draft floor trivially passes), *then* the rest
-	   of the update (including the new entry_track) applies normally. cycle_number bumps
-	   automatically via state_machine.bump_cycle_number.
-	2. destination_country being set/changed is checked against Applicant Country Ban.
+	In-flight immutability guard: if the candidate has an active Placement that has advanced
+	into or past Selected (Selected, Processing, Stamped, Ticketed, Departed), core identity,
+	passport, and destination fields are strictly locked against casual modification.
 	"""
 	doc = frappe.get_doc("Applicant", applicant_name)
 	if not doc.has_permission("write"):
@@ -102,15 +111,28 @@ def update_applicant(applicant_name, override_ban=False, override_reason=None, *
 	data.pop("status", None)
 	data.pop("doctype", None)
 	data.pop("name", None)
-	# passport_issue_date is read_only in applicant.json (2026-08-29 correction: always derived
-	# as passport_expiry_date - 5y via Applicant.calc_passport_issue_date, never manually
-	# entered) -- dropped here, same as the structural fields above, rather than accepted and
-	# silently overwritten by that hook a moment later (backend-issues #04).
 	data.pop("passport_issue_date", None)
+
+	if doc.active_placement:
+		placement_status = frappe.db.get_value("Placement", doc.active_placement, "status")
+		if placement_status in ("Selected", "Processing", "Stamped", "Ticketed", "Departed"):
+			attempted = set(data.keys()) & CORE_IDENTITY_FIELDS
+			if attempted:
+				frappe.throw(
+					f"Cannot modify core identity/corridor fields ({', '.join(sorted(attempted))}) "
+					f"while applicant has an active placement ({doc.active_placement}, status: '{placement_status}').",
+					frappe.ValidationError,
+				)
 
 	new_country = data.get("destination_country")
 	if new_country and new_country != doc.destination_country:
 		_check_country_ban_or_throw(applicant_name, new_country, override_ban, override_reason)
+
+	if "entry_track" in data and data["entry_track"] != doc.entry_track and doc.active_placement:
+		frappe.throw(
+			f"Cannot change entry_track while applicant has an active placement ({doc.active_placement}).",
+			frappe.ValidationError,
+		)
 
 	doc.update(data)
 	if "entry_track" in data and data["entry_track"] != doc.entry_track and doc.status in CYCLE_REGRESSION_STATUSES:
@@ -240,23 +262,6 @@ def register_applicant(applicant_name=None, **kwargs):
 		data = {k: v for k, v in kwargs.items() if k not in ("cmd", "applicant_name", "name", "applicant")}
 		if data:
 			doc.update(data)
-	# Ensure minimal floor for Registered transition
-	doc.salary_amount = doc.salary_amount or 1200
-	doc.salary_currency = doc.salary_currency or "SAR"
-	doc.religion = doc.religion or "Muslim"
-	doc.marital_status = doc.marital_status or "Single"
-	doc.passport_number = doc.passport_number or f"EP{int(frappe.utils.now_datetime().timestamp()) % 10000000}"
-	doc.passport_issue_date = doc.passport_issue_date or "2023-01-01"
-	doc.passport_expiry_date = doc.passport_expiry_date or "2028-01-01"
-	doc.passport_issue_place = doc.passport_issue_place or "Addis Ababa"
-	doc.date_of_birth = doc.date_of_birth or "1998-05-14"
-	doc.education = doc.education or "High School"
-	doc.target_job = doc.target_job or "Housemaid"
-	doc.photograph = doc.photograph or "/files/photo.jpg"
-	doc.passport_scan = doc.passport_scan or "/files/passport.pdf"
-	doc.medical_status = doc.medical_status or "FIT"
-	doc.medical_issue_date = doc.medical_issue_date or "2026-08-01"
-	doc.medical_expiry_date = doc.medical_expiry_date or "2026-11-01"
 	transition(doc, "Registered")
 	frappe.db.commit()
 	return doc.as_dict()

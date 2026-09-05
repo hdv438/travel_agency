@@ -132,11 +132,33 @@ def list_threads():
 
 
 @frappe.whitelist()
+def list_all_threads():
+	"""Agency-wide thread listing for oversight roles (Admin, Manager, Communication Manager, System Manager)."""
+	oversight_roles = {"Admin", "Manager", "Communication Manager", "System Manager", "Administrator"}
+	if not (oversight_roles & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	threads = frappe.get_all(
+		"Chat Thread",
+		fields=["name", "thread_type", "contractor", "context_type", "context_reference", "last_message_at", "creation"],
+		order_by="last_message_at desc, creation desc",
+	)
+	for t in threads:
+		t["participants"] = frappe.get_all(
+			"Chat Thread Participant",
+			filters={"parent": t["name"]},
+			pluck="user",
+		)
+	return threads
+
+
+@frappe.whitelist()
 def get_thread_messages(thread_name=None, **kwargs):
 	thread_name = thread_name or kwargs.get("thread_id") or kwargs.get("thread")
 	if not thread_name:
 		frappe.throw("thread_name is required.", frappe.ValidationError)
-	if frappe.session.user != "Administrator" and not is_participant(frappe.session.user, thread_name):
+	oversight_roles = {"Admin", "Manager", "Communication Manager", "System Manager", "Administrator"}
+	if not (oversight_roles & set(frappe.get_roles())) and not is_participant(frappe.session.user, thread_name):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	return frappe.get_all(
 		"Chat Message",

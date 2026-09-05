@@ -120,41 +120,43 @@ def complete_clearance_step(
 	return step.as_dict()
 
 
-def _get_active_step_for_type(step_types):
-	steps = frappe.get_all(
-		"Clearance Step",
-		filters={"step_type": ["in", step_types]},
-		fields=["name", "status", "placement"],
-		order_by="creation desc",
-		limit=30,
-	)
-	for s in steps:
-		if s.placement and frappe.db.exists("Placement", s.placement):
-			plc_status = frappe.db.get_value("Placement", s.placement, "status")
-			if s.status not in ("Complete", "Issued", "Stamped", "Cancelled", "Rejected") and plc_status not in ("Departed", "Cancelled"):
-				return s.name
-	for s in steps:
-		if s.placement and frappe.db.exists("Placement", s.placement):
-			return s.name
-	return None
+def _load_actionable_step(clearance_step_name, expected_types=None):
+	"""Load the EXACT Clearance Step to act on -- never guess another placement's step. A missing or
+	stale/invalid id is a hard error (2026-09-05 data-integrity fix): the previous behavior silently
+	fell back to "the most recently created active step of this type" ACROSS ALL PLACEMENTS, so a
+	stale id from the UI would land the action on a different worker's placement -- producing e.g. a
+	Departed placement whose own LMIS step is still Pending. Also refuses to edit any step once its
+	placement is Departed/Cancelled (that history is final)."""
+	if not clearance_step_name:
+		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
+	if not frappe.db.exists("Clearance Step", clearance_step_name):
+		frappe.throw(f"Clearance Step {clearance_step_name} not found.", frappe.DoesNotExistError)
+	step = frappe.get_doc("Clearance Step", clearance_step_name)
+	if expected_types and step.step_type not in expected_types:
+		frappe.throw(
+			f"{clearance_step_name} is a '{step.step_type}' step, not one of {sorted(expected_types)}.",
+			frappe.ValidationError,
+		)
+	placement_status = frappe.db.get_value("Placement", step.placement, "status")
+	if placement_status in ("Departed", "Cancelled"):
+		frappe.throw(
+			f"{step.placement} is already {placement_status}; its clearance steps can no longer be edited.",
+			frappe.ValidationError,
+		)
+	return step
 
 
 @frappe.whitelist()
 def start_clearance_step(clearance_step_name=None, step_name=None, name=None, **kwargs):
 	clearance_step_name = clearance_step_name or step_name or name or kwargs.get("clearance_step")
-	if (
-		not clearance_step_name
-		or not frappe.db.exists("Clearance Step", clearance_step_name)
-		or not frappe.db.exists("Placement", frappe.db.get_value("Clearance Step", clearance_step_name, "placement"))
-	):
-		clearance_step_name = _get_active_step_for_type(["Saudi LMIS", "Kuwait LMIS", "Telesign", "Saudi Taeshir", "LMIS Clearance"])
-	if not clearance_step_name:
-		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
-	step = frappe.get_doc("Clearance Step", clearance_step_name)
+	step = _load_actionable_step(clearance_step_name)
 	if not _can_act_on_step(step):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if step.status == "In Progress":
 		return step.as_dict()
+	# S-2: only a not-yet-started step can be started (never revert a Submitted/Complete/etc. step).
+	if step.status != "Pending":
+		frappe.throw(f"A '{step.status}' clearance step cannot be (re)started.", frappe.ValidationError)
 	step.status = "In Progress"
 	step.date_started = today()
 	step.save(ignore_permissions=True)
@@ -165,19 +167,14 @@ def start_clearance_step(clearance_step_name=None, step_name=None, name=None, **
 def submit_embassy_step(clearance_step_name=None, **kwargs):
 	"""Documents submitted (Monday). Saudi/Kuwait Embassy only."""
 	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
-	if (
-		not clearance_step_name
-		or not frappe.db.exists("Clearance Step", clearance_step_name)
-		or not frappe.db.exists("Placement", frappe.db.get_value("Clearance Step", clearance_step_name, "placement"))
-	):
-		clearance_step_name = _get_active_step_for_type(["Embassy", "Kuwait Embassy", "Saudi Embassy"])
-	if not clearance_step_name:
-		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
-	step = frappe.get_doc("Clearance Step", clearance_step_name)
+	step = _load_actionable_step(clearance_step_name, {"Embassy", "Kuwait Embassy", "Saudi Embassy"})
 	if not _can_act_on_step(step):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if step.status == "Submitted":
 		return step.as_dict()
+	# S-2: submit only from a pre-submit state (not from an already-Stamped/Rejected step).
+	if step.status not in ("Pending", "In Progress"):
+		frappe.throw(f"An embassy step that is '{step.status}' cannot be submitted.", frappe.ValidationError)
 	step.status = "Submitted"
 	step.date_started = today()
 	step.save(ignore_permissions=True)
@@ -189,19 +186,14 @@ def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 	"""Documents returned stamped (Thursday) -- the success outcome."""
 	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
 	reference_no = reference_no or kwargs.get("visa_number") or kwargs.get("reference")
-	if (
-		not clearance_step_name
-		or not frappe.db.exists("Clearance Step", clearance_step_name)
-		or not frappe.db.exists("Placement", frappe.db.get_value("Clearance Step", clearance_step_name, "placement"))
-	):
-		clearance_step_name = _get_active_step_for_type(["Embassy", "Kuwait Embassy", "Saudi Embassy"])
-	if not clearance_step_name:
-		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
-	step = frappe.get_doc("Clearance Step", clearance_step_name)
+	step = _load_actionable_step(clearance_step_name, {"Embassy", "Kuwait Embassy", "Saudi Embassy"})
 	if not _can_act_on_step(step):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if step.status == "Stamped":
 		return step.as_dict()
+	# S-2: documents can only be Stamped after they were Submitted (the Mon->Thu cycle).
+	if step.status != "Submitted":
+		frappe.throw(f"Documents must be Submitted before they can be Stamped (this step is '{step.status}').", frappe.ValidationError)
 	step.status = "Stamped"
 	step.date_completed = today()
 	step.completed_by = frappe.session.user
@@ -224,6 +216,9 @@ def reject_embassy_step(clearance_step_name, rejection_remark):
 	if not _can_act_on_step(step):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	assert_clearance_step_not_terminal(step)
+	# S-2: a Rejected outcome only makes sense for documents that were actually Submitted.
+	if step.status != "Submitted":
+		frappe.throw(f"Documents must be Submitted before they can be Rejected (this step is '{step.status}').", frappe.ValidationError)
 	step.status = "Rejected"
 	step.rejection_remark = rejection_remark
 	step.date_completed = today()
@@ -245,18 +240,52 @@ def reassign_clearance_step(clearance_step_name, new_officer):
 
 
 @frappe.whitelist()
-def list_my_clearance_steps():
-	"""A Clearance Officer / Ticketer's own ToDo-scoped queue."""
-	return frappe.get_list(
+def list_my_clearance_steps(placement=None):
+	"""A Clearance Officer / Ticketer's queue, optionally filtered by placement."""
+	filters = {}
+	if placement:
+		filters["placement"] = placement
+	steps = frappe.get_list(
 		"Clearance Step",
-		fields=["name", "placement", "step_type", "status", "sequence_order", "is_mandatory"],
+		filters=filters,
+		fields=[
+			"name",
+			"placement",
+			"step_type",
+			"status",
+			"sequence_order",
+			"is_mandatory",
+			"date_started",
+			"date_completed",
+			"completed_by",
+			"reference_no",
+			"amount",
+			"payment_status",
+			"wakala_amount",
+			"wakala_status",
+			"rejection_remark",
+		],
 		order_by="sequence_order asc",
 	)
+	for s in steps:
+		if s.get("step_type") == "Taeshir":
+			active_injaz = frappe.get_all(
+				"Injaz Attempt",
+				filters={"parent": s["name"]},
+				fields=["application_id", "appointment_date", "outcome", "amount_sar"],
+				order_by="creation desc",
+				limit_page_length=1,
+			)
+			if active_injaz:
+				s["injaz_application_id"] = active_injaz[0]["application_id"]
+				s["appointment_date"] = active_injaz[0]["appointment_date"]
+				s["injaz_outcome"] = active_injaz[0]["outcome"]
+	return steps
 
 
 @frappe.whitelist()
-def list_assigned_steps():
-	return list_my_clearance_steps()
+def list_assigned_steps(placement=None):
+	return list_my_clearance_steps(placement=placement)
 
 
 # ── Taeshir / Injaz attempts ───────────────────────────────────────────────────

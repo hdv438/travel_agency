@@ -12,7 +12,7 @@ import frappe
 
 from agency_tracking.state_machine import log_action
 
-CONTRACTOR_MANAGE_ROLES = {"Manager", "Admin", "Finance Manager", "Registrar", "System Manager"}
+CONTRACTOR_MANAGE_ROLES = {"Manager", "Admin", "Finance Manager", "Registrar", "Communication Manager", "System Manager"}
 
 
 @frappe.whitelist()

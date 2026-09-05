@@ -6616,6 +6616,578 @@
           }
         ]
       }
+    },
+    "/api/method/agency_tracking.chat_api.list_all_threads": {
+      "post": {
+        "tags": [
+          "Chat & Communication"
+        ],
+        "summary": "List all active chat threads for the current user",
+        "description": "Lists all conversation threads (placement, corridor, complaint, or direct) accessible to the calling session user.",
+        "x-roles": [
+          "Internal Staff",
+          "Foreign Agency"
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of active chat thread records"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.complaint_api.list_complaints": {
+      "post": {
+        "tags": [
+          "Complaints"
+        ],
+        "summary": "List all complaints",
+        "description": "Returns role-scoped list of complaint tickets (scoped to foreign agency tenant if called by Foreign Agency role).",
+        "x-roles": [
+          "Manager",
+          "Admin",
+          "Agent",
+          "Foreign Agency",
+          "System Manager"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "formData",
+            "type": "string",
+            "description": "Filter by complaint status"
+          },
+          {
+            "name": "applicant",
+            "in": "formData",
+            "type": "string",
+            "description": "Filter by applicant name"
+          }
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of complaint tickets"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.complaint_api.list_new_complaints": {
+      "post": {
+        "tags": [
+          "Complaints"
+        ],
+        "summary": "List newly opened complaints",
+        "description": "Returns newly submitted complaints requiring triage or review.",
+        "x-roles": [
+          "Manager",
+          "Admin",
+          "Agent",
+          "Foreign Agency",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of new complaints"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.employee_api.list_employees": {
+      "post": {
+        "tags": [
+          "Employees & Identity"
+        ],
+        "summary": "List agency employees with aggregated roles",
+        "description": "Performs a single-query aggregation of agency employees, their system user accounts, enabled status, and operational roles.",
+        "x-roles": [
+          "Admin",
+          "System Manager",
+          "Manager"
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of employees with role details"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.employee_api.create_employee": {
+      "post": {
+        "tags": [
+          "Employees & Identity"
+        ],
+        "summary": "Create an agency employee and linked system user",
+        "description": "Creates Frappe User, Employee record, and assigns designated operational roles atomically.",
+        "x-roles": [
+          "Admin",
+          "System Manager"
+        ],
+        "parameters": [
+          {
+            "name": "email",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "first_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "last_name",
+            "in": "formData",
+            "type": "string"
+          },
+          {
+            "name": "phone",
+            "in": "formData",
+            "type": "string"
+          },
+          {
+            "name": "roles",
+            "in": "formData",
+            "type": "string",
+            "description": "JSON array of role names"
+          }
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Created employee and user details"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.employee_api.update_employee_roles": {
+      "post": {
+        "tags": [
+          "Employees & Identity"
+        ],
+        "summary": "Update operational roles assigned to an employee",
+        "description": "Synchronizes Frappe Has Role assignments for the employee's system user account.",
+        "x-roles": [
+          "Admin",
+          "System Manager"
+        ],
+        "parameters": [
+          {
+            "name": "user",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "roles",
+            "in": "formData",
+            "type": "string",
+            "required": true,
+            "description": "JSON array of role names"
+          }
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated role assignment confirmation"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.employee_api.toggle_employee_status": {
+      "post": {
+        "tags": [
+          "Employees & Identity"
+        ],
+        "summary": "Enable or disable an employee account",
+        "description": "Toggles User.enabled and Employee.status between Active and Inactive.",
+        "x-roles": [
+          "Admin",
+          "System Manager"
+        ],
+        "parameters": [
+          {
+            "name": "user",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "enabled",
+            "in": "formData",
+            "type": "integer",
+            "required": true,
+            "description": "1 to enable, 0 to disable"
+          }
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated employee status confirmation"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.employee_api.reset_employee_password": {
+      "post": {
+        "tags": [
+          "Employees & Identity"
+        ],
+        "summary": "Reset an employee's system login password",
+        "description": "Administrative password reset for agency staff users.",
+        "x-roles": [
+          "Admin",
+          "System Manager"
+        ],
+        "parameters": [
+          {
+            "name": "user",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "new_password",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Password reset confirmation"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.employee_api.delete_employee": {
+      "post": {
+        "tags": [
+          "Employees & Identity"
+        ],
+        "summary": "Soft-delete or disable an employee",
+        "description": "Marks the employee inactive and disables system login.",
+        "x-roles": [
+          "Admin",
+          "System Manager"
+        ],
+        "parameters": [
+          {
+            "name": "user",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Employee removal confirmation"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.health.health_check": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Liveness and database readiness probe",
+        "description": "Unauthenticated probe for uptime monitors and load balancers. Returns 200 with service name, database status, and server time.",
+        "x-roles": [
+          "Guest",
+          "All Users"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service health details"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Liveness and database readiness probe",
+        "description": "Unauthenticated probe for uptime monitors and load balancers.",
+        "x-roles": [
+          "Guest",
+          "All Users"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service health details"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.notification_api.get_vapid_public_key": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Get Web Push VAPID public key",
+        "description": "Returns the server VAPID public key for browser service worker push subscription.",
+        "x-roles": [
+          "All Authenticated Users"
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "VAPID public key object"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.notification_api.regenerate_vapid_keys": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Regenerate Web Push VAPID keypair",
+        "description": "Administrative regeneration of VAPID application server keys.",
+        "x-roles": [
+          "Admin",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "New VAPID key status"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.portal_api.get_candidate_detail": {
+      "post": {
+        "tags": [
+          "Portal"
+        ],
+        "summary": "Get non-PII catalog candidate detail for foreign agency",
+        "description": "Returns rich profile (video, skills matrix, physical attributes, salary expectation) scoped to the foreign agency's destination country.",
+        "x-roles": [
+          "Foreign Agency",
+          "Manager",
+          "Admin",
+          "System Manager",
+          "Registrar"
+        ],
+        "parameters": [
+          {
+            "name": "applicant_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Non-PII candidate profile"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.portal_api.list_my_placements": {
+      "post": {
+        "tags": [
+          "Portal"
+        ],
+        "summary": "List placements owned by the calling foreign agency",
+        "description": "Returns reserved and active candidate placements belonging to the foreign agency session.",
+        "x-roles": [
+          "Foreign Agency",
+          "Manager",
+          "Admin",
+          "System Manager"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "formData",
+            "type": "string"
+          }
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of agency placements"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.storage_engine.test_storage_connection": {
+      "post": {
+        "tags": [
+          "Documents & Storage"
+        ],
+        "summary": "Test S3/Wasabi/Local storage connectivity",
+        "description": "Tests upload and download capability against the configured active storage provider.",
+        "x-roles": [
+          "Admin",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Storage connectivity test result"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.portal_api.get_candidate_photo": {
+      "post": {
+        "tags": [
+          "Portal (Foreign Agency)"
+        ],
+        "summary": "Get a candidate's photo (image)",
+        "description": "Serve a portal candidate's photograph/photo_full_body as an image to an agency allowed to view that candidate (same gate as get_candidate_detail). Agencies can't read the private File docs directly; passport/contract/visa are never served here. Local file streamed, R2 object redirected. Also callable via GET to back an <img src>. Returns image bytes.",
+        "x-roles": [
+          "Foreign Agency",
+          "Manager",
+          "Admin",
+          "System Manager",
+          "Registrar"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "produces": [
+          "image/jpeg",
+          "image/png",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "applicant_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "kind",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "enum": [
+              "photograph",
+              "photo_full_body"
+            ],
+            "description": "default photograph"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candidate photo (image bytes)"
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "404": {
+            "description": "No photo / candidate not found"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
     }
   },
   "definitions": {

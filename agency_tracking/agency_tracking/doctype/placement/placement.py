@@ -40,3 +40,18 @@ class Placement(Document):
 	def stamp_departed_on(self):
 		if self.status == "Departed" and not self.departed_on:
 			self.departed_on = now_datetime()
+
+
+def get_permission_query_conditions(user):
+	"""S-3 (2026-09-05): clearance-country roles (Saudi/Kuwait LMIS, Taeshir, Telesign, Embassy)
+	see only placements that have a clearance step of their own type. Management and every other
+	internal role keep full access. Applies to frappe.get_list (Desk + list_placements)."""
+	from agency_tracking.agency_tracking.doctype.clearance_step.clearance_step import scoped_clearance_step_types
+
+	types = scoped_clearance_step_types(user)
+	if types is None:
+		return ""
+	if not types:
+		return "1=0"
+	escaped = ", ".join(frappe.db.escape(t) for t in types)
+	return f"`tabPlacement`.name in (select placement from `tabClearance Step` where step_type in ({escaped}))"

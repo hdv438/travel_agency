@@ -85,8 +85,23 @@ class Applicant(Document):
 	def validate(self):
 		self.set_full_name()
 		self.validate_passport_dates()
+		self.validate_age_limits()
 		self.validate_field_floor()
 		self.validate_uniqueness()
+
+	def validate_age_limits(self):
+		"""Legal labor migration age bounds: candidates must be between 18 and 65 years old."""
+		if self.age is not None:
+			if self.age < 18:
+				frappe.throw(
+					f"Applicant age is {self.age} years. Minimum legal employment age is 18.",
+					frappe.ValidationError,
+				)
+			if self.age > 65:
+				frappe.throw(
+					f"Applicant age is {self.age} years. Maximum legal employment age is 65.",
+					frappe.ValidationError,
+				)
 
 	def validate_passport_dates(self):
 		"""Logical/date-sanity checks (audit G-008): the field floor only checks presence, not that
@@ -310,3 +325,20 @@ class Applicant(Document):
 			).insert(ignore_permissions=True)
 			row.db_set("transaction", txn.name)
 			row.db_set("status", "Pending")
+
+
+def get_permission_query_conditions(user):
+	"""S-3 (2026-09-05): clearance-country roles see only applicants who have a placement with a
+	clearance step of their own type. Management and every other internal role keep full access."""
+	from agency_tracking.agency_tracking.doctype.clearance_step.clearance_step import scoped_clearance_step_types
+
+	types = scoped_clearance_step_types(user)
+	if types is None:
+		return ""
+	if not types:
+		return "1=0"
+	escaped = ", ".join(frappe.db.escape(t) for t in types)
+	return (
+		"`tabApplicant`.name in (select applicant from `tabPlacement` where name in "
+		f"(select placement from `tabClearance Step` where step_type in ({escaped})))"
+	)
