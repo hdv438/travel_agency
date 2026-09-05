@@ -146,7 +146,24 @@ if mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -
   HAS_BASE_TABLES=true
 fi
 
-if [ "${FORCE_NEW_SITE:-0}" = "1" ] || [ "$HAS_BASE_TABLES" = false ]; then
+# If database already has tables, look for an existing site configuration
+EXISTING_SITE=""
+if [ "$HAS_BASE_TABLES" = true ]; then
+  EXISTING_SITE=$(find sites -maxdepth 2 -name "site_config.json" -not -path "sites/assets/*" 2>/dev/null | head -n 1 | cut -d/ -f2 || true)
+fi
+
+if [ -n "$EXISTING_SITE" ] && [ ! -e "sites/${SITE_NAME}" ]; then
+  echo "Found existing site '${EXISTING_SITE}'. Linking '${SITE_NAME}' -> '${EXISTING_SITE}'..."
+  ln -sfn "$EXISTING_SITE" "sites/${SITE_NAME}"
+fi
+
+if [ -n "${RAILWAY_PUBLIC_DOMAIN:-}" ] && [ ! -e "sites/${RAILWAY_PUBLIC_DOMAIN}" ]; then
+  TARGET_SITE="${EXISTING_SITE:-${SITE_NAME}}"
+  echo "Linking Railway public domain '${RAILWAY_PUBLIC_DOMAIN}' -> '${TARGET_SITE}'..."
+  ln -sfn "$TARGET_SITE" "sites/${RAILWAY_PUBLIC_DOMAIN}"
+fi
+
+if [ "${FORCE_NEW_SITE:-0}" = "1" ] || ([ "$HAS_BASE_TABLES" = false ] && [ -z "$EXISTING_SITE" ]); then
   if [ -d "sites/${SITE_NAME}" ]; then
     echo "Database ${DB_NAME} is clean or FORCE_NEW_SITE=1 set. Clearing site folder for fresh installation..."
     rm -rf "sites/${SITE_NAME}"
