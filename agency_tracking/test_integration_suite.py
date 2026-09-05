@@ -179,6 +179,14 @@ def run():
             print(f"  Sample step fields: {list(s0.keys())}")
             assert "payment_status" in s0
             assert "reference_no" in s0
+
+        # Also test as Administrator to verify all steps including Taeshir and Injaz Attempts
+        frappe.set_user("Administrator")
+        admin_steps = clearance_api.list_my_clearance_steps()
+        print(f"  Administrator list_my_clearance_steps returned {len(admin_steps)} steps")
+        taeshir_steps = [s for s in admin_steps if s.get("step_type") == "Taeshir"]
+        print(f"  Verified {len(taeshir_steps)} Taeshir steps loaded without 500 error")
+
         results["clearance_operational_fields"] = "PASSED"
         print("  [SUCCESS] Clearance steps returned complete operational fields.")
     except Exception as e:

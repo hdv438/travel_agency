@@ -272,14 +272,14 @@ def list_my_clearance_steps(placement=None):
 			active_injaz = frappe.get_all(
 				"Injaz Attempt",
 				filters={"parent": s["name"]},
-				fields=["application_id", "appointment_date", "outcome", "amount_sar"],
+				fields=["injaz_application_id", "appointment_date", "outcome", "injaz_amount"],
 				order_by="creation desc",
 				limit_page_length=1,
 			)
 			if active_injaz:
-				s["injaz_application_id"] = active_injaz[0]["application_id"]
-				s["appointment_date"] = active_injaz[0]["appointment_date"]
-				s["injaz_outcome"] = active_injaz[0]["outcome"]
+				s["injaz_application_id"] = active_injaz[0].get("injaz_application_id")
+				s["appointment_date"] = active_injaz[0].get("appointment_date")
+				s["injaz_outcome"] = active_injaz[0].get("outcome")
 	return steps
 
 
