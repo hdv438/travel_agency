@@ -6,3 +6,4 @@ agency_tracking.patches.migrate_injaz_fields_to_attempts
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
+agency_tracking.patches.remove_foreign_agency_from_admin

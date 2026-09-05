@@ -37,6 +37,10 @@ def route_agency_to_communication_manager(contractor_name):
 	if contractor.communication_manager:
 		return contractor.communication_manager
 
+	# If initiating caller is Administrator or internal Communication Manager / Admin, assign them
+	if frappe.session.user == "Administrator" or bool({"Communication Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
+		return frappe.session.user
+
 	managers = sorted(
 		frappe.get_all(
 			"Has Role", filters={"role": "Communication Manager", "parenttype": "User"}, pluck="parent"
