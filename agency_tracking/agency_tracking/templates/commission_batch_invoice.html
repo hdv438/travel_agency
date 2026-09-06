@@ -16,18 +16,25 @@
 	<p>Agency: {{ contractor_name }}<br>Destination: {{ batch.destination_country }}<br>Status: {{ batch.status }}</p>
 	<table>
 		<thead>
-			<tr><th>Applicant</th><th>Amount (Birr)</th><th>Status</th></tr>
+			<tr><th>Applicant</th><th>Amount ({{ batch.currency }})</th><th>Status</th></tr>
 		</thead>
 		<tbody>
 			{% for row in rows %}
 			<tr>
 				<td>{{ row.full_name }}</td>
-				<td>{{ "%.2f"|format(row.amount_birr or 0) }}</td>
+				<td>{{ "%.2f"|format(row.amount_original or 0) }}</td>
 				<td>{{ row.status }}</td>
 			</tr>
 			{% endfor %}
 		</tbody>
 	</table>
-	<p class="total">Total: {{ "%.2f"|format(batch.total_amount_birr or 0) }} Birr</p>
+	<p class="total">Total Requested: {{ "%.2f"|format(batch.total_amount_original or 0) }} {{ batch.currency }}</p>
+	{% if batch.advance_amount_original %}
+	<p class="total">Advance Received: {{ "%.2f"|format(batch.advance_amount_original) }} {{ batch.currency }}</p>
+	{% endif %}
+	{% if batch.write_off_amount_original %}
+	<p class="total">Write-off / Discount: {{ "%.2f"|format(batch.write_off_amount_original) }} {{ batch.currency }} ({{ batch.write_off_reason }})</p>
+	{% endif %}
+	<p class="total">Balance Due: {{ "%.2f"|format(batch.balance_due_original or 0) }} {{ batch.currency }}</p>
 </body>
 </html>

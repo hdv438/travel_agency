@@ -8,20 +8,25 @@
  "field_order": [
   "contractor",
   "destination_country",
+  "currency",
   "col_break_cbr",
   "status",
+  "total_amount_original",
   "total_amount_birr",
   "requested_advance_amount",
   "items_sec",
   "items",
   "settlement_sec",
   "settlement_reference",
+  "advance_amount_original",
   "advance_amount",
   "advance_reference",
   "advance_received_on",
+  "write_off_amount_original",
   "write_off_amount",
   "write_off_reason",
   "write_off_transaction",
+  "balance_due_original",
   "balance_due_birr",
   "settled_on"
  ],
@@ -47,6 +52,17 @@
    "reqd": 1
   },
   {
+   "fieldname": "currency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Currency",
+   "options": "SAR\nKWD\nUSD\nETB\nAED\nQAR",
+   "read_only": 1,
+   "reqd": 1,
+   "description": "All items in a batch share one currency (taken from the commissions batched in). Birr is used only for internal income/expense accounting, never for the agency-facing invoice."
+  },
+  {
    "fieldname": "col_break_cbr",
    "fieldtype": "Column Break"
   },
@@ -61,16 +77,24 @@
    "read_only": 1
   },
   {
+   "fieldname": "total_amount_original",
+   "fieldtype": "Currency",
+   "label": "Total (Batch Currency)",
+   "read_only": 1,
+   "description": "Sum of the batched commissions in the batch's own currency. This, not the Birr figure, is what drives settlement status and what's shown on the invoice."
+  },
+  {
    "fieldname": "total_amount_birr",
    "fieldtype": "Currency",
    "label": "Total (Birr)",
-   "read_only": 1
+   "read_only": 1,
+   "description": "Internal accounting figure only -- FX-converted at each commission's accrual date. Not shown on the agency invoice."
   },
   {
    "fieldname": "requested_advance_amount",
    "fieldtype": "Currency",
-   "label": "Requested Advance (Birr)",
-   "description": "An up-front amount the agency is asked to pay ASAP when the batch is created, ahead of settling the whole total. Informational -- what actually arrives is recorded in Advance Received."
+   "label": "Requested Advance",
+   "description": "An up-front amount the agency is asked to pay ASAP when the batch is created, ahead of settling the whole total. In the batch's currency. Informational -- what actually arrives is recorded in Advance Received."
   },
   {
    "fieldname": "items_sec",
@@ -95,10 +119,17 @@
    "label": "Settlement Reference"
   },
   {
+   "fieldname": "advance_amount_original",
+   "fieldtype": "Currency",
+   "label": "Advance Received (Batch Currency)",
+   "description": "Partial amount actually received from the foreign agency against this batch, in the batch's own currency. Leave 0 for a full settlement. This drives the invoice and settlement status."
+  },
+  {
    "fieldname": "advance_amount",
    "fieldtype": "Currency",
    "label": "Advance Received (Birr)",
-   "description": "Partial amount actually received from the foreign agency against this batch, when they remit less than the full requested total. Leave 0 for a full settlement."
+   "read_only": 1,
+   "description": "Internal accounting figure only -- computed from Advance Received (Batch Currency) at the batch's FX rate. Not shown on the agency invoice."
   },
   {
    "fieldname": "advance_reference",
@@ -113,11 +144,18 @@
    "read_only": 1
   },
   {
+   "fieldname": "write_off_amount_original",
+   "fieldtype": "Currency",
+   "label": "Write-off / Discount (Batch Currency)",
+   "read_only": 1,
+   "description": "Agreed discount the agency doesn't pay, in the batch's own currency (e.g. the $1000 negotiated off a $5000 USD batch). Set via finance_api.write_off_batch. Drives the invoice and settlement status."
+  },
+  {
    "fieldname": "write_off_amount",
    "fieldtype": "Currency",
    "label": "Write-off / Discount (Birr)",
    "read_only": 1,
-   "description": "Agreed discount the agency doesn't pay (recorded as an Expense). Set via finance_api.write_off_batch. Reduces balance due and, once advance + write-off cover the total, settles the batch."
+   "description": "Internal accounting figure only -- the Birr amount actually booked on the linked Expense transaction. Not shown on the agency invoice."
   },
   {
    "fieldname": "write_off_reason",
@@ -133,11 +171,18 @@
    "read_only": 1
   },
   {
+   "fieldname": "balance_due_original",
+   "fieldtype": "Currency",
+   "label": "Balance Due (Batch Currency)",
+   "read_only": 1,
+   "description": "Total minus advance received minus write-off, in the batch's own currency. Auto-computed. This is the figure shown on the invoice and used to determine settlement status."
+  },
+  {
    "fieldname": "balance_due_birr",
    "fieldtype": "Currency",
    "label": "Balance Due (Birr)",
    "read_only": 1,
-   "description": "Total minus advance received minus write-off. Auto-computed."
+   "description": "Internal accounting figure only, mirrored from the same item set. Auto-computed."
   },
   {
    "fieldname": "settled_on",

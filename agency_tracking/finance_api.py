@@ -13,6 +13,7 @@ from agency_tracking.finance_engine import (
 	fetch_daily_fx_rates,
 	get_fx_rate as _get_fx_rate,
 	list_owed_commissions,
+	list_owed_commissions_by_currency,
 	mark_batch_items_paid,
 	match_batch_payment_proof,
 	record_fx_rate,
@@ -206,7 +207,10 @@ def fetch_fx_rates_now():
 
 
 @frappe.whitelist()
-def get_owed_commissions(contractor=None, destination_country=None, order="oldest", **kwargs):
+def get_owed_commissions(contractor=None, destination_country=None, order="oldest", currency=None, **kwargs):
+	"""currency narrows to one currency's owed pool -- pass it when building a batch (a batch is
+	always single-currency). Omit it to see everything owed regardless of currency; if that spans
+	more than one currency, use get_owed_commissions_by_currency to group them for picking."""
 	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	contractor = contractor or kwargs.get("contractor_name")
@@ -216,16 +220,45 @@ def get_owed_commissions(contractor=None, destination_country=None, order="oldes
 		destination_country = frappe.db.get_value("Contractor", contractor, "country")
 	if not destination_country:
 		return []
-	return list_owed_commissions(contractor, destination_country, order)
+	return list_owed_commissions(contractor, destination_country, order, currency)
 
 
 @frappe.whitelist()
-def create_commission_batch(contractor=None, destination_country=None, transaction_names=None, requested_advance_amount=None, **kwargs):
+def get_owed_commissions_by_currency(contractor=None, destination_country=None, **kwargs):
+	"""Owed commissions grouped by currency -- what a "create a batch" screen should show, since
+	a batch/invoice is always single-currency and a contractor's rate table can price different
+	tracks/genders differently."""
+	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	contractor = contractor or kwargs.get("contractor_name")
+	if not contractor:
+		frappe.throw("contractor is required.", frappe.ValidationError)
+	if not destination_country:
+		destination_country = frappe.db.get_value("Contractor", contractor, "country")
+	if not destination_country:
+		return {}
+	return list_owed_commissions_by_currency(contractor, destination_country)
+
+
+@frappe.whitelist()
+def create_commission_batch(
+	contractor=None,
+	destination_country=None,
+	transaction_names=None,
+	requested_advance_amount=None,
+	currency=None,
+	**kwargs,
+):
 	"""Manual batching path (Part D: "both paths converge on one create_batch_request()
 	function" — the other path is the automatic one inside finance_engine.accrue_commission).
 	transaction_names selects which owed commissions to include (default: all owed for the
 	contractor/country, which can include items carried over from prior batches via
-	release_unpaid_items). requested_advance_amount records an up-front "pay this ASAP" ask."""
+	release_unpaid_items). requested_advance_amount records an up-front "pay this ASAP" ask, in
+	the batch's currency.
+
+	A batch is always single-currency (it's what gets invoiced to one agency in one currency).
+	If transaction_names is omitted and the owed pool spans more than one currency, pass currency
+	to say which one to batch (see get_owed_commissions_by_currency to see the split first)."""
 	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	contractor = contractor or kwargs.get("contractor_name")
@@ -238,15 +271,17 @@ def create_commission_batch(contractor=None, destination_country=None, transacti
 	if isinstance(transaction_names, str):
 		transaction_names = frappe.parse_json(transaction_names)
 	requested_advance_amount = requested_advance_amount if requested_advance_amount is not None else kwargs.get("requested_advance")
-	batch = create_batch_request(contractor, destination_country, transaction_names, requested_advance_amount)
+	batch = create_batch_request(contractor, destination_country, transaction_names, requested_advance_amount, currency)
 	return batch.as_dict()
 
 
 @frappe.whitelist()
 def write_off_batch(batch_name=None, write_off_amount=None, write_off_reason=None, **kwargs):
-	"""Record an agreed discount on a batch (the agency pays less by negotiation). Books an Expense
-	for the shortfall and, once advance + write-off cover the total, settles the batch. Amounts are
-	in Birr, consistent with the rest of the batch."""
+	"""Record an agreed discount on a batch (the agency pays less by negotiation), e.g. a batch
+	invoiced at $5000 where the agency negotiates $1000 off and pays $4000. Books an Expense for
+	the shortfall and, once advance + write-off cover the total, settles the batch. write_off_amount
+	is in the batch's own currency (batch.currency), same as the invoice -- not Birr; Birr is
+	derived internally for accounting."""
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	batch_name = batch_name or kwargs.get("batch") or kwargs.get("name")
@@ -287,9 +322,10 @@ def list_commission_batches(contractor=None, status=None, destination_country=No
 		"Commission Batch Request",
 		filters=filters,
 		fields=[
-			"name", "contractor", "destination_country", "status", "total_amount_birr",
-			"requested_advance_amount", "advance_amount", "write_off_amount", "balance_due_birr",
-			"settled_on", "creation",
+			"name", "contractor", "destination_country", "currency", "status",
+			"total_amount_original", "total_amount_birr", "requested_advance_amount",
+			"advance_amount_original", "advance_amount", "write_off_amount_original", "write_off_amount",
+			"balance_due_original", "balance_due_birr", "settled_on", "creation",
 		],
 		order_by="creation desc",
 	)
@@ -316,6 +352,7 @@ def get_commission_batch(batch_name=None, **kwargs):
 				"placement": placement,
 				"applicant": applicant,
 				"full_name": frappe.db.get_value("Applicant", applicant, "full_name") if applicant else None,
+				"amount_original": frappe.db.get_value("Applicant Transaction", row.transaction, "amount_original"),
 				"amount_birr": frappe.db.get_value("Applicant Transaction", row.transaction, "amount_birr"),
 				"status": row.status,
 				"original_batch": row.get("original_batch"),
@@ -353,9 +390,12 @@ def settle_batch(batch_name, settlement_reference):
 @frappe.whitelist()
 def record_batch_advance(batch_name=None, advance_amount=None, advance_reference=None, **kwargs):
 	"""Record a partial/advance payment received from the foreign agency against a commission
-	batch, when they remit less than the full requested total. Sets advance_amount (+ reference
-	and received-on date); the controller recomputes balance_due_birr and flips an open batch to
-	Partially Settled. Full settlement still goes through settle_batch / settle_batch_items."""
+	batch, when they remit less than the full requested total. advance_amount is in the batch's
+	own currency (batch.currency) -- the amount the agency actually sent, same denomination as
+	the invoice. Sets advance_amount_original (+ reference and received-on date); the controller
+	recomputes balance_due and flips an open batch to Partially Settled. A Birr mirror is derived
+	here (at today's FX rate) for internal accounting only. Full settlement still goes through
+	settle_batch / settle_batch_items."""
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	batch_name = batch_name or kwargs.get("batch") or kwargs.get("name")
@@ -371,22 +411,28 @@ def record_batch_advance(batch_name=None, advance_amount=None, advance_reference
 
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
 	# Reconcile against per-item payments + any write-off so total credited can't exceed the
-	# obligation (audit N-1). All Birr -- foreign-currency remittances are converted before entry.
-	accounted = flt(batch.paid_from_items()) + amount + flt(batch.write_off_amount)
-	if accounted > flt(batch.total_amount_birr):
+	# obligation (audit N-1). All in the batch's own currency, same as the invoice.
+	paid_items_original, _ = batch.paid_from_items()
+	accounted = flt(paid_items_original) + amount + flt(batch.write_off_amount_original)
+	if accounted > flt(batch.total_amount_original):
 		frappe.throw(
-			f"Paid-per-item ({batch.paid_from_items()}) + advance ({amount}) + write-off "
-			f"({flt(batch.write_off_amount)}) cannot exceed the batch total "
-			f"({batch.total_amount_birr or 0}). Use settle_batch for a full settlement.",
+			f"Paid-per-item ({paid_items_original}) + advance ({amount}) + write-off "
+			f"({flt(batch.write_off_amount_original)}) cannot exceed the batch total "
+			f"({batch.total_amount_original or 0}) {batch.currency}. Use settle_batch for a full settlement.",
 			frappe.ValidationError,
 		)
-	batch.advance_amount = amount
+	fx_rate, _ = _get_fx_rate(batch.currency)
+	batch.advance_amount_original = amount
+	batch.advance_amount = round(flt(amount) * flt(fx_rate), 2)
 	if advance_reference:
 		batch.advance_reference = advance_reference
 	batch.advance_received_on = today()
 	batch.save(ignore_permissions=True)
-	log_action("Commission Batch Request", batch.name,
-	           f"Advance received: {amount} Birr" + (f" (ref {advance_reference})" if advance_reference else ""))
+	log_action(
+		"Commission Batch Request",
+		batch.name,
+		f"Advance received: {amount} {batch.currency}" + (f" (ref {advance_reference})" if advance_reference else ""),
+	)
 	return batch.as_dict()
 
 

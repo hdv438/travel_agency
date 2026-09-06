@@ -210,28 +210,45 @@ def accrue_commission(placement, from_status=None, actor=None):
 # --- Batching (Part D: "both paths converge on one create_batch_request() function") ---
 
 
-def _owed_commission_filters(contractor_name, destination_country):
+def _owed_commission_filters(contractor_name, destination_country, currency=None):
 	placements = frappe.get_all(
 		"Placement",
 		filters={"contractor": contractor_name, "destination_country": destination_country},
 		pluck="name",
 	)
-	return {
+	filters = {
 		"placement": ["in", placements or [""]],
 		"transaction_type": "Commission",
 		"status": "Approved",
 		"commission_batch_request": ["is", "not set"],
 	}
+	if currency:
+		filters["currency_original"] = currency
+	return filters
 
 
-def list_owed_commissions(contractor_name, destination_country, order="oldest"):
+def list_owed_commissions(contractor_name, destination_country, order="oldest", currency=None):
+	"""Owed commissions for a contractor+country, optionally narrowed to one currency. A
+	contractor's rate table can price different tracks/genders in different currencies, so
+	without a currency filter this can return a mix -- callers that batch (create_batch_request)
+	always group by currency, since a batch/invoice is single-currency."""
 	order_by = "creation asc" if order == "oldest" else "creation desc"
 	return frappe.get_all(
 		"Applicant Transaction",
-		filters=_owed_commission_filters(contractor_name, destination_country),
+		filters=_owed_commission_filters(contractor_name, destination_country, currency),
 		fields=["name", "placement", "amount_original", "currency_original", "amount_birr", "creation"],
 		order_by=order_by,
 	)
+
+
+def list_owed_commissions_by_currency(contractor_name, destination_country):
+	"""Same pool as list_owed_commissions, grouped by currency -- what a batch picker should show
+	so a Finance user can't accidentally try to batch two currencies together."""
+	rows = list_owed_commissions(contractor_name, destination_country)
+	grouped = {}
+	for row in rows:
+		grouped.setdefault(row["currency_original"], []).append(row)
+	return grouped
 
 
 def _original_batch_for(transaction_name):
@@ -253,15 +270,49 @@ def _batch_item_rows(transaction_names):
 	]
 
 
-def create_batch_request(contractor_name, destination_country, transaction_names=None, requested_advance_amount=None):
-	if transaction_names is None:
-		transaction_names = frappe.get_all(
-			"Applicant Transaction",
-			filters=_owed_commission_filters(contractor_name, destination_country),
-			pluck="name",
+def _single_currency_of(transaction_names):
+	"""A batch is one invoice in one currency -- verify the given transactions agree, and return
+	it. Throws rather than silently picking one if they disagree (mixed-currency batching is a
+	Finance-user mistake, e.g. picking Standard/USD and Muayena/SAR rows for the same contractor
+	into one request)."""
+	currencies = set(
+		frappe.get_all(
+			"Applicant Transaction", filters={"name": ["in", transaction_names]}, pluck="currency_original"
 		)
+	)
+	if len(currencies) > 1:
+		frappe.throw(
+			f"Cannot batch commissions in different currencies together ({', '.join(sorted(currencies))}). "
+			"Create separate batches per currency.",
+			frappe.ValidationError,
+		)
+	return currencies.pop() if currencies else None
+
+
+def create_batch_request(
+	contractor_name, destination_country, transaction_names=None, requested_advance_amount=None, currency=None
+):
+	"""currency narrows the owed pool when transaction_names isn't given explicitly -- required
+	whenever a contractor+country has owed commissions in more than one currency (see
+	list_owed_commissions_by_currency), since a batch/invoice is always single-currency."""
+	if transaction_names is None:
+		owed = list_owed_commissions(contractor_name, destination_country, currency=currency)
+		if not currency:
+			distinct = {row["currency_original"] for row in owed}
+			if len(distinct) > 1:
+				frappe.throw(
+					f"Owed commissions for {contractor_name} / {destination_country} span multiple "
+					f"currencies ({', '.join(sorted(distinct))}). Specify which currency to batch.",
+					frappe.ValidationError,
+				)
+		transaction_names = [row["name"] for row in owed]
+
 	if not transaction_names:
-		existing = frappe.db.get_value("Commission Batch Request", {"contractor": contractor_name}, "name")
+		existing = frappe.db.get_value(
+			"Commission Batch Request",
+			{"contractor": contractor_name, "destination_country": destination_country, "status": "Draft"},
+			"name",
+		)
 		if existing:
 			return frappe.get_doc("Commission Batch Request", existing)
 		batch = frappe.get_doc(
@@ -269,6 +320,7 @@ def create_batch_request(contractor_name, destination_country, transaction_names
 				"doctype": "Commission Batch Request",
 				"contractor": contractor_name,
 				"destination_country": destination_country,
+				"currency": currency,
 				"status": "Draft",
 				"requested_advance_amount": requested_advance_amount or 0,
 				"items": [],
@@ -276,11 +328,13 @@ def create_batch_request(contractor_name, destination_country, transaction_names
 		).insert(ignore_permissions=True)
 		return batch
 
+	batch_currency = _single_currency_of(transaction_names)
 	batch = frappe.get_doc(
 		{
 			"doctype": "Commission Batch Request",
 			"contractor": contractor_name,
 			"destination_country": destination_country,
+			"currency": batch_currency,
 			"status": "Draft",
 			"requested_advance_amount": requested_advance_amount or 0,
 			"items": _batch_item_rows(transaction_names),
@@ -297,7 +351,12 @@ def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 	"""Record an agreed discount the agency won't pay (Requested vs Paid vs Expense): books a
 	single Expense Applicant Transaction for the written-off amount, links it to the batch, and
 	lets the controller reduce balance_due (settling the batch once advance + write-off cover the
-	total). One write-off per batch. Amounts are in Birr, like the rest of the batch's money."""
+	total). One write-off per batch.
+
+	write_off_amount is in the BATCH'S OWN CURRENCY (e.g. the $1000 negotiated off a $5000 USD
+	batch), matching how the agency actually negotiates and how the invoice is denominated --
+	not Birr. It's converted to Birr here (at today's rate for that currency) purely to book the
+	underlying Expense transaction, which -- like every other ledger entry -- is Birr-normalized."""
 	if not write_off_reason:
 		frappe.throw("A reason is required to write off a batch amount.", frappe.ValidationError)
 	amount = Decimal(str(write_off_amount or 0))
@@ -308,25 +367,30 @@ def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 	if batch.write_off_transaction:
 		frappe.throw(f"{batch_name} already has a write-off recorded.", frappe.ValidationError)
 	# Reconcile against everything already accounted for -- per-item payments + advance + this
-	# write-off can't exceed the obligation, else the batch is over-credited (audit N-1).
-	paid_items = Decimal(str(batch.paid_from_items()))
-	accounted = paid_items + Decimal(str(batch.advance_amount or 0)) + amount
-	if accounted > Decimal(str(batch.total_amount_birr or 0)):
+	# write-off can't exceed the obligation, else the batch is over-credited (audit N-1). All in
+	# the batch's own currency, same as the invoice the agency is negotiating against.
+	paid_items_original, _ = batch.paid_from_items()
+	paid_items = Decimal(str(paid_items_original))
+	accounted = paid_items + Decimal(str(batch.advance_amount_original or 0)) + amount
+	if accounted > Decimal(str(batch.total_amount_original or 0)):
 		frappe.throw(
-			f"Paid-per-item ({paid_items}) + advance ({batch.advance_amount or 0}) + write-off "
-			f"({amount}) cannot exceed the batch total ({batch.total_amount_birr or 0}).",
+			f"Paid-per-item ({paid_items}) + advance ({batch.advance_amount_original or 0}) + write-off "
+			f"({amount}) cannot exceed the batch total ({batch.total_amount_original or 0}) {batch.currency}.",
 			frappe.ValidationError,
 		)
+
+	fx_rate, fx_rate_date = get_fx_rate(batch.currency)
+	amount_birr = round(amount * Decimal(str(fx_rate)), 2)
 
 	txn = frappe.get_doc(
 		{
 			"doctype": "Applicant Transaction",
 			"transaction_type": "Expense",
 			"amount_original": amount,
-			"currency_original": "ETB",
-			"fx_rate": Decimal("1.0"),
-			"fx_rate_date": today(),
-			"amount_birr": amount,
+			"currency_original": batch.currency,
+			"fx_rate": Decimal(str(fx_rate)),
+			"fx_rate_date": fx_rate_date,
+			"amount_birr": amount_birr,
 			"commission_batch_request": batch.name,
 			"description": f"Commission write-off (agreed discount) for {batch.name}: {write_off_reason}",
 			"stage_logged_at": "Commission Batch",
@@ -336,11 +400,16 @@ def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 		}
 	).insert(ignore_permissions=True)
 
-	batch.write_off_amount = amount
+	batch.write_off_amount_original = amount
+	batch.write_off_amount = amount_birr
 	batch.write_off_reason = write_off_reason
 	batch.write_off_transaction = txn.name
 	batch.save(ignore_permissions=True)
-	log_action("Commission Batch Request", batch.name, f"Write-off {amount} Birr: {write_off_reason} (txn {txn.name})")
+	log_action(
+		"Commission Batch Request",
+		batch.name,
+		f"Write-off {amount} {batch.currency} ({amount_birr} Birr): {write_off_reason} (txn {txn.name})",
+	)
 	return batch
 
 
@@ -459,15 +528,21 @@ def match_batch_payment_proof(batch_name, file_url):
 
 def render_batch_invoice_pdf(batch_name):
 	"""On-demand PDF (applicant names + amounts) via Frappe's standard print/wkhtmltopdf path
-	-- not pre-generated/stored at batch creation, built fresh whenever requested."""
+	-- not pre-generated/stored at batch creation, built fresh whenever requested.
+
+	Agency-facing, so everything is shown in the batch's own currency (self.currency) --
+	the amounts the foreign agency actually negotiated in. Birr never appears here; it's
+	only the internal income/expense figure, visible in the app's own Finance views."""
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
 	rows = []
 	for item in batch.items:
+		if item.status == "Released":
+			continue  # carried into a later batch -- not this invoice's obligation
 		placement_name = frappe.db.get_value("Applicant Transaction", item.transaction, "placement")
 		applicant_name = frappe.db.get_value("Placement", placement_name, "applicant") if placement_name else None
 		full_name = frappe.db.get_value("Applicant", applicant_name, "full_name") if applicant_name else "—"
-		amount = frappe.db.get_value("Applicant Transaction", item.transaction, "amount_birr")
-		rows.append({"full_name": full_name, "amount_birr": amount, "status": item.status})
+		amount = frappe.db.get_value("Applicant Transaction", item.transaction, "amount_original")
+		rows.append({"full_name": full_name, "amount_original": amount, "status": item.status})
 
 	html = frappe.render_template(
 		"agency_tracking/templates/commission_batch_invoice.html",
@@ -477,14 +552,16 @@ def render_batch_invoice_pdf(batch_name):
 
 
 def _maybe_auto_batch(contractor_name, destination_country):
+	"""Threshold is checked per currency -- a contractor with 12 owed USD commissions and 8 owed
+	SAR commissions has two independent pools, since batches (and their invoices) are always
+	single-currency. Hitting the threshold in one currency doesn't pull in the other."""
 	contractor = frappe.get_doc("Contractor", contractor_name)
 	if contractor.batch_mode != "Auto-Threshold" or not contractor.batch_threshold:
 		return
-	unbatched_count = frappe.db.count(
-		"Applicant Transaction", filters=_owed_commission_filters(contractor_name, destination_country)
-	)
-	if unbatched_count >= contractor.batch_threshold:
-		create_batch_request(contractor_name, destination_country)
+	owed_by_currency = list_owed_commissions_by_currency(contractor_name, destination_country)
+	for currency, rows in owed_by_currency.items():
+		if len(rows) >= contractor.batch_threshold:
+			create_batch_request(contractor_name, destination_country, currency=currency)
 
 
 # --- Placement-stage write authorization (addendum: "whoever's assigned to the placement's
