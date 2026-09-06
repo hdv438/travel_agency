@@ -163,6 +163,55 @@ def void_transaction(transaction_name, void_reason):
 
 
 @frappe.whitelist()
+def list_transactions(
+	status=None,
+	transaction_type=None,
+	placement=None,
+	applicant=None,
+	from_date=None,
+	to_date=None,
+	order_by="creation desc",
+	limit_page_length=100,
+	**kwargs,
+):
+	"""Finance Manager/Admin/System Manager. Applicant Transaction history across every status
+	(Pending/Approved/Rejected/Voided) -- unlike get_pending_approval_queue (report_api.py), which
+	only ever shows Pending. Surfaces who acted on each row: approved_by/approved_on for
+	Approved, rejection_reason for Rejected, logged_by for who originally created it. from_date/
+	to_date filter on creation date (inclusive)."""
+	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	filters = {}
+	status = status or kwargs.get("transaction_status")
+	if status:
+		filters["status"] = status
+	if transaction_type:
+		filters["transaction_type"] = transaction_type
+	if placement:
+		filters["placement"] = placement
+	if applicant:
+		filters["applicant"] = applicant
+	if from_date and to_date:
+		filters["creation"] = ["between", [from_date, to_date]]
+	elif from_date:
+		filters["creation"] = [">=", from_date]
+	elif to_date:
+		filters["creation"] = ["<=", to_date]
+	return frappe.get_all(
+		"Applicant Transaction",
+		filters=filters,
+		fields=[
+			"name", "applicant", "placement", "transaction_type", "stage_logged_at", "status",
+			"amount_original", "currency_original", "amount_birr", "description",
+			"logged_by", "approved_by", "approved_on", "rejection_reason",
+			"commission_batch_request", "creation",
+		],
+		order_by=order_by,
+		limit_page_length=limit_page_length,
+	)
+
+
+@frappe.whitelist()
 def trigger_early_commission_accrual(placement_name):
 	"""Part D: "Manual early-trigger (idempotency-guarded either way)" — for cases needing to
 	bill sooner than Departed. Same accrue_commission() as the automatic path, so calling this
@@ -279,9 +328,12 @@ def create_commission_batch(
 def write_off_batch(batch_name=None, write_off_amount=None, write_off_reason=None, **kwargs):
 	"""Record an agreed discount on a batch (the agency pays less by negotiation), e.g. a batch
 	invoiced at $5000 where the agency negotiates $1000 off and pays $4000. Books an Expense for
-	the shortfall and, once advance + write-off cover the total, settles the batch. write_off_amount
-	is in the batch's own currency (batch.currency), same as the invoice -- not Birr; Birr is
-	derived internally for accounting."""
+	the shortfall and, once paid + advance + write-offs cover the total, settles the batch.
+	Callable multiple times per batch -- each call appends a new write-off row (batch.write_offs)
+	rather than replacing a single field, so a batch can have several negotiated discounts over
+	time, each with its own reason and its own Expense transaction. write_off_amount is in the
+	batch's own currency (batch.currency), same as the invoice -- not Birr; Birr is derived
+	internally for accounting."""
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	batch_name = batch_name or kwargs.get("batch") or kwargs.get("name")
@@ -324,7 +376,9 @@ def list_commission_batches(contractor=None, status=None, destination_country=No
 		fields=[
 			"name", "contractor", "destination_country", "currency", "status",
 			"total_amount_original", "total_amount_birr", "requested_advance_amount",
-			"advance_amount_original", "advance_amount", "write_off_amount_original", "write_off_amount",
+			"paid_amount_original", "paid_amount_birr",
+			"advance_amount_original", "advance_amount",
+			"write_off_total_original", "write_off_total_birr",
 			"balance_due_original", "balance_due_birr", "settled_on", "creation",
 		],
 		order_by="creation desc",
@@ -410,14 +464,15 @@ def record_batch_advance(batch_name=None, advance_amount=None, advance_reference
 		frappe.throw("advance_amount must be greater than zero.", frappe.ValidationError)
 
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
-	# Reconcile against per-item payments + any write-off so total credited can't exceed the
+	# Reconcile against per-item payments + all write-offs so total credited can't exceed the
 	# obligation (audit N-1). All in the batch's own currency, same as the invoice.
 	paid_items_original, _ = batch.paid_from_items()
-	accounted = flt(paid_items_original) + amount + flt(batch.write_off_amount_original)
+	write_off_original, _ = batch.write_off_totals()
+	accounted = flt(paid_items_original) + amount + flt(write_off_original)
 	if accounted > flt(batch.total_amount_original):
 		frappe.throw(
-			f"Paid-per-item ({paid_items_original}) + advance ({amount}) + write-off "
-			f"({flt(batch.write_off_amount_original)}) cannot exceed the batch total "
+			f"Paid-per-item ({paid_items_original}) + advance ({amount}) + write-offs "
+			f"({write_off_original}) cannot exceed the batch total "
 			f"({batch.total_amount_original or 0}) {batch.currency}. Use settle_batch for a full settlement.",
 			frappe.ValidationError,
 		)

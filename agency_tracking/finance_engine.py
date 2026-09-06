@@ -348,10 +348,12 @@ def create_batch_request(
 
 
 def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
-	"""Record an agreed discount the agency won't pay (Requested vs Paid vs Expense): books a
-	single Expense Applicant Transaction for the written-off amount, links it to the batch, and
-	lets the controller reduce balance_due (settling the batch once advance + write-off cover the
-	total). One write-off per batch.
+	"""Record an agreed discount the agency won't pay (Requested vs Paid vs Expense): books an
+	Expense Applicant Transaction for the written-off amount, links it to the batch, and lets the
+	controller reduce balance_due (settling the batch once paid + advance + write-offs cover the
+	total). A batch can have MULTIPLE write-offs -- each negotiation round (or partial discount)
+	appends its own row to batch.write_offs rather than replacing a single field, so the batch
+	keeps a full history of every discount agreed, not just the last one.
 
 	write_off_amount is in the BATCH'S OWN CURRENCY (e.g. the $1000 negotiated off a $5000 USD
 	batch), matching how the agency actually negotiates and how the invoice is denominated --
@@ -364,18 +366,23 @@ def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 		frappe.throw("write_off_amount must be greater than zero.", frappe.ValidationError)
 
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
-	if batch.write_off_transaction:
-		frappe.throw(f"{batch_name} already has a write-off recorded.", frappe.ValidationError)
-	# Reconcile against everything already accounted for -- per-item payments + advance + this
-	# write-off can't exceed the obligation, else the batch is over-credited (audit N-1). All in
-	# the batch's own currency, same as the invoice the agency is negotiating against.
+	# Reconcile against everything already accounted for -- per-item payments + advance + every
+	# existing write-off + this new one can't exceed the obligation, else the batch is
+	# over-credited (audit N-1). All in the batch's own currency, same as the invoice the agency
+	# is negotiating against.
 	paid_items_original, _ = batch.paid_from_items()
-	paid_items = Decimal(str(paid_items_original))
-	accounted = paid_items + Decimal(str(batch.advance_amount_original or 0)) + amount
+	existing_write_off_original, _ = batch.write_off_totals()
+	accounted = (
+		Decimal(str(paid_items_original))
+		+ Decimal(str(batch.advance_amount_original or 0))
+		+ Decimal(str(existing_write_off_original))
+		+ amount
+	)
 	if accounted > Decimal(str(batch.total_amount_original or 0)):
 		frappe.throw(
-			f"Paid-per-item ({paid_items}) + advance ({batch.advance_amount_original or 0}) + write-off "
-			f"({amount}) cannot exceed the batch total ({batch.total_amount_original or 0}) {batch.currency}.",
+			f"Paid-per-item ({paid_items_original}) + advance ({batch.advance_amount_original or 0}) + "
+			f"existing write-offs ({existing_write_off_original}) + this write-off ({amount}) cannot "
+			f"exceed the batch total ({batch.total_amount_original or 0}) {batch.currency}.",
 			frappe.ValidationError,
 		)
 
@@ -400,10 +407,16 @@ def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 		}
 	).insert(ignore_permissions=True)
 
-	batch.write_off_amount_original = amount
-	batch.write_off_amount = amount_birr
-	batch.write_off_reason = write_off_reason
-	batch.write_off_transaction = txn.name
+	batch.append(
+		"write_offs",
+		{
+			"amount_original": amount,
+			"amount_birr": amount_birr,
+			"reason": write_off_reason,
+			"transaction": txn.name,
+			"write_off_date": today(),
+		},
+	)
 	batch.save(ignore_permissions=True)
 	log_action(
 		"Commission Batch Request",

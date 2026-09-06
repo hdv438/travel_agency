@@ -28,12 +28,26 @@
 			{% endfor %}
 		</tbody>
 	</table>
-	<p class="total">Total Requested: {{ "%.2f"|format(batch.total_amount_original or 0) }} {{ batch.currency }}</p>
-	{% if batch.advance_amount_original %}
-	<p class="total">Advance Received: {{ "%.2f"|format(batch.advance_amount_original) }} {{ batch.currency }}</p>
-	{% endif %}
-	{% if batch.write_off_amount_original %}
-	<p class="total">Write-off / Discount: {{ "%.2f"|format(batch.write_off_amount_original) }} {{ batch.currency }} ({{ batch.write_off_reason }})</p>
+	<p class="total">Original Amount Requested: {{ "%.2f"|format(batch.total_amount_original or 0) }} {{ batch.currency }}</p>
+	<p class="total">Advance Asked: {{ "%.2f"|format(batch.requested_advance_amount or 0) }} {{ batch.currency }}</p>
+	<p class="total">Advance Received: {{ "%.2f"|format(batch.advance_amount_original or 0) }} {{ batch.currency }}</p>
+	<p class="total">Paid (Per-Applicant): {{ "%.2f"|format(batch.paid_amount_original or 0) }} {{ batch.currency }}</p>
+	<p class="total">Total Write-off / Discount: {{ "%.2f"|format(batch.write_off_total_original or 0) }} {{ batch.currency }}</p>
+	{% if batch.write_offs %}
+	<table>
+		<thead>
+			<tr><th>Write-off Date</th><th>Amount ({{ batch.currency }})</th><th>Reason</th></tr>
+		</thead>
+		<tbody>
+			{% for w in batch.write_offs %}
+			<tr>
+				<td>{{ w.write_off_date }}</td>
+				<td>{{ "%.2f"|format(w.amount_original or 0) }}</td>
+				<td>{{ w.reason }}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
 	{% endif %}
 	<p class="total">Balance Due: {{ "%.2f"|format(batch.balance_due_original or 0) }} {{ batch.currency }}</p>
 </body>

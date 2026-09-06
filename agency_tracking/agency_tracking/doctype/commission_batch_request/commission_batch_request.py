@@ -29,22 +29,30 @@ class CommissionBatchRequest(Document):
 			birr += b
 		return original, birr
 
+	def write_off_totals(self):
+		"""(original-currency, birr) summed across every write-off row -- a batch can have any
+		number of write-offs (agency negotiates a discount more than once), not just one."""
+		original = sum(flt(row.amount_original) for row in (self.write_offs or []))
+		birr = sum(flt(row.amount_birr) for row in (self.write_offs or []))
+		return original, birr
+
 	def _apply_settlement_math(self):
-		"""Single reconciled money model (2026-09-06: currency-native invoicing, audit N-1 follow-up).
-		Every batch is single-currency (items are grouped by currency at batch creation -- see
-		finance_engine.create_batch_request), so the agency-facing numbers -- total, advance,
-		write-off, balance due -- are all tracked in that ORIGINAL currency. That's what drives the
-		invoice and the settlement status below. The parallel *_birr fields are recomputed alongside
-		for internal income/expense accounting only; they never drive status.
+		"""Single reconciled money model (2026-09-06: currency-native invoicing, audit N-1 follow-up;
+		multi-write-off, 2026-09-06). Every batch is single-currency (items are grouped by currency
+		at batch creation -- see finance_engine.create_batch_request), so the agency-facing numbers
+		-- total, paid, advance, write-off, balance due -- are all tracked in that ORIGINAL
+		currency. That's what drives the invoice and the settlement status below. The parallel
+		*_birr fields are recomputed alongside for internal income/expense accounting only; they
+		never drive status.
 
 		  obligation  = sum of non-Released item amounts (in the batch's currency)
-		  accounted   = paid-per-item + advance received + write-off (agreed discount)
+		  accounted   = paid-per-item + advance received + sum(write-offs)
 		  balance_due = obligation - accounted
 
-		The two settlement mechanisms (per-item Paid marks and batch-level advance/write-off) feed
-		ONE balance, so they can't over-credit each other. Settled once accounted covers the
-		obligation; any partial coverage on an open batch -> Partially Settled. Never downgrades an
-		already-Settled batch."""
+		The settlement mechanisms (per-item Paid marks, batch-level advance, and one-or-more
+		write-offs) all feed ONE balance, so they can't over-credit each other. Settled once
+		accounted covers the obligation; any partial coverage on an open batch -> Partially
+		Settled. Never downgrades an already-Settled batch."""
 		items = self.items or []
 		# Released items were carried into a later batch -- no longer this batch's obligation.
 		total_original = total_birr = 0
@@ -58,17 +66,21 @@ class CommissionBatchRequest(Document):
 		self.total_amount_birr = total_birr
 
 		advance_original = flt(self.advance_amount_original)
-		write_off_original = flt(self.write_off_amount_original)
+		write_off_original, write_off_birr = self.write_off_totals()
+		self.write_off_total_original = write_off_original
+		self.write_off_total_birr = write_off_birr
 		paid_original, paid_birr = self.paid_from_items()
+		self.paid_amount_original = paid_original
+		self.paid_amount_birr = paid_birr
 
 		accounted_original = paid_original + advance_original + write_off_original
 		self.balance_due_original = max(flt(self.total_amount_original) - accounted_original, 0)
 
-		# Birr mirrors, for internal accounting only. advance_amount/write_off_amount (Birr) are
-		# fixed at the moment they're recorded (record_batch_advance / apply_batch_write_off), each
-		# at that day's FX rate for the batch currency -- NOT re-derived here, so they don't drift
-		# if the FX rate changes on a later re-save.
-		accounted_birr = paid_birr + flt(self.advance_amount) + flt(self.write_off_amount)
+		# Birr mirror, for internal accounting only. advance_amount (Birr) is fixed at the moment
+		# it's recorded (record_batch_advance), at that day's FX rate for the batch currency --
+		# NOT re-derived here, so it doesn't drift if the FX rate changes on a later re-save. Each
+		# write-off's Birr amount is likewise fixed at the moment it's booked.
+		accounted_birr = paid_birr + flt(self.advance_amount) + write_off_birr
 		self.balance_due_birr = max(flt(self.total_amount_birr) - accounted_birr, 0)
 
 		if total_original > 0 and accounted_original >= total_original:

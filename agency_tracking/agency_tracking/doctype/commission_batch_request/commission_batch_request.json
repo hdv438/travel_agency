@@ -18,14 +18,16 @@
   "items",
   "settlement_sec",
   "settlement_reference",
+  "paid_amount_original",
+  "paid_amount_birr",
   "advance_amount_original",
   "advance_amount",
   "advance_reference",
   "advance_received_on",
-  "write_off_amount_original",
-  "write_off_amount",
-  "write_off_reason",
-  "write_off_transaction",
+  "write_offs_sec",
+  "write_offs",
+  "write_off_total_original",
+  "write_off_total_birr",
   "balance_due_original",
   "balance_due_birr",
   "settled_on"
@@ -119,6 +121,20 @@
    "label": "Settlement Reference"
   },
   {
+   "fieldname": "paid_amount_original",
+   "fieldtype": "Currency",
+   "label": "Paid Per-Item (Batch Currency)",
+   "read_only": 1,
+   "description": "Sum of items individually marked Paid (settle_batch_items / payment-proof matching), in the batch's own currency. Auto-computed."
+  },
+  {
+   "fieldname": "paid_amount_birr",
+   "fieldtype": "Currency",
+   "label": "Paid Per-Item (Birr)",
+   "read_only": 1,
+   "description": "Internal accounting mirror of Paid Per-Item. Auto-computed."
+  },
+  {
    "fieldname": "advance_amount_original",
    "fieldtype": "Currency",
    "label": "Advance Received (Batch Currency)",
@@ -144,31 +160,31 @@
    "read_only": 1
   },
   {
-   "fieldname": "write_off_amount_original",
-   "fieldtype": "Currency",
-   "label": "Write-off / Discount (Batch Currency)",
+   "fieldname": "write_offs_sec",
+   "fieldtype": "Section Break",
+   "label": "Write-offs / Discounts"
+  },
+  {
+   "fieldname": "write_offs",
+   "fieldtype": "Table",
+   "label": "Write-offs",
+   "options": "Commission Batch Write Off",
    "read_only": 1,
-   "description": "Agreed discount the agency doesn't pay, in the batch's own currency (e.g. the $1000 negotiated off a $5000 USD batch). Set via finance_api.write_off_batch. Drives the invoice and settlement status."
+   "description": "Agreed discounts the agency doesn't pay, each in the batch's own currency (e.g. $1000 negotiated off a $5000 USD batch). One or more per batch -- appended via finance_api.write_off_batch, each booking its own Expense transaction. Together they drive the invoice and settlement status."
   },
   {
-   "fieldname": "write_off_amount",
+   "fieldname": "write_off_total_original",
    "fieldtype": "Currency",
-   "label": "Write-off / Discount (Birr)",
+   "label": "Write-off Total (Batch Currency)",
    "read_only": 1,
-   "description": "Internal accounting figure only -- the Birr amount actually booked on the linked Expense transaction. Not shown on the agency invoice."
+   "description": "Sum of all write-offs above, in the batch's own currency. Auto-computed."
   },
   {
-   "fieldname": "write_off_reason",
-   "fieldtype": "Small Text",
-   "label": "Write-off Reason",
-   "read_only": 1
-  },
-  {
-   "fieldname": "write_off_transaction",
-   "fieldtype": "Link",
-   "label": "Write-off Expense Transaction",
-   "options": "Applicant Transaction",
-   "read_only": 1
+   "fieldname": "write_off_total_birr",
+   "fieldtype": "Currency",
+   "label": "Write-off Total (Birr)",
+   "read_only": 1,
+   "description": "Internal accounting mirror of Write-off Total. Auto-computed."
   },
   {
    "fieldname": "balance_due_original",
