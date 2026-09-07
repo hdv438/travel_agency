@@ -8,7 +8,9 @@
  "field_order": [
   "contractor_name",
   "country",
+  "license_no",
   "col_break_contractor",
+  "telephone",
   "user",
   "communication_manager",
   "finance_sec",
@@ -36,8 +38,19 @@
    "reqd": 1
   },
   {
+   "description": "Shown on generated Commission Invoice PDFs, under the contractor name.",
+   "fieldname": "license_no",
+   "fieldtype": "Data",
+   "label": "License No"
+  },
+  {
    "fieldname": "col_break_contractor",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "telephone",
+   "fieldtype": "Data",
+   "label": "Telephone"
   },
   {
    "description": "The portal login for this agency (Part G: one Foreign Agency user per Contractor for now).",

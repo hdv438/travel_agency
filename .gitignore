@@ -13,4 +13,7 @@ _e2e.py
 audit_helper.py
 backend_schema_audit.json
 frontend_api_calls.json
+chan.md
+/sample_invoices/
+agency_tracking/templates/commision request/
 

@@ -8,7 +8,8 @@
  "field_order": [
   "transaction",
   "status",
-  "original_batch"
+  "original_batch",
+  "payment_reference"
  ],
  "fields": [
   {
@@ -35,6 +36,12 @@
    "label": "Carried From Batch",
    "options": "Commission Batch Request",
    "read_only": 1
+  },
+  {
+   "description": "Free-text beneficiary bank account / reference shown on the Commission Invoice PDF row for this applicant, e.g. '1091002079 - JAMILAH ASIRI'.",
+   "fieldname": "payment_reference",
+   "fieldtype": "Data",
+   "label": "Payment Reference"
   }
  ],
  "index_web_pages_for_search": 1,

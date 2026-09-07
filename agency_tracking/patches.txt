@@ -9,3 +9,5 @@ agency_tracking.patches.migrate_commission_batch_write_off_to_child_table
 # Patches added in this section will be executed after doctypes are migrated
 agency_tracking.patches.remove_foreign_agency_from_admin
 agency_tracking.patches.backfill_commission_batch_currency
+agency_tracking.patches.seed_agency_tracking_settings
+agency_tracking.patches.backfill_batch_and_clearance_titles

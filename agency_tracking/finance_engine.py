@@ -350,10 +350,10 @@ def create_batch_request(
 def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 	"""Record an agreed discount the agency won't pay (Requested vs Paid vs Expense): books an
 	Expense Applicant Transaction for the written-off amount, links it to the batch, and lets the
-	controller reduce balance_due (settling the batch once paid + advance + write-offs cover the
-	total). A batch can have MULTIPLE write-offs -- each negotiation round (or partial discount)
-	appends its own row to batch.write_offs rather than replacing a single field, so the batch
-	keeps a full history of every discount agreed, not just the last one.
+	controller reduce balance_due (settling the batch once paid + write-offs cover the total). A
+	batch can have MULTIPLE write-offs -- each negotiation round (or partial discount) appends its
+	own row to batch.write_offs rather than replacing a single field, so the batch keeps a full
+	history of every discount agreed, not just the last one.
 
 	write_off_amount is in the BATCH'S OWN CURRENCY (e.g. the $1000 negotiated off a $5000 USD
 	batch), matching how the agency actually negotiates and how the invoice is denominated --
@@ -366,21 +366,21 @@ def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 		frappe.throw("write_off_amount must be greater than zero.", frappe.ValidationError)
 
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
-	# Reconcile against everything already accounted for -- per-item payments + advance + every
-	# existing write-off + this new one can't exceed the obligation, else the batch is
-	# over-credited (audit N-1). All in the batch's own currency, same as the invoice the agency
-	# is negotiating against.
+	# Reconcile against everything already accounted for -- per-item payments + every existing
+	# write-off + this new one can't exceed the obligation, else the batch is over-credited
+	# (audit N-1). Advance is deliberately excluded -- it's a loan requested ahead, not a payment
+	# against this batch, so it doesn't count toward this ceiling (matches _apply_settlement_math).
+	# All in the batch's own currency, same as the invoice the agency is negotiating against.
 	paid_items_original, _ = batch.paid_from_items()
 	existing_write_off_original, _ = batch.write_off_totals()
 	accounted = (
 		Decimal(str(paid_items_original))
-		+ Decimal(str(batch.advance_amount_original or 0))
 		+ Decimal(str(existing_write_off_original))
 		+ amount
 	)
 	if accounted > Decimal(str(batch.total_amount_original or 0)):
 		frappe.throw(
-			f"Paid-per-item ({paid_items_original}) + advance ({batch.advance_amount_original or 0}) + "
+			f"Paid-per-item ({paid_items_original}) + "
 			f"existing write-offs ({existing_write_off_original}) + this write-off ({amount}) cannot "
 			f"exceed the batch total ({batch.total_amount_original or 0}) {batch.currency}.",
 			frappe.ValidationError,
@@ -421,7 +421,7 @@ def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 	log_action(
 		"Commission Batch Request",
 		batch.name,
-		f"Write-off {amount} {batch.currency} ({amount_birr} Birr): {write_off_reason} (txn {txn.name})",
+		f"[{batch.title or batch.name}] Write-off {amount} {batch.currency} ({amount_birr} Birr): {write_off_reason} (txn {txn.name})",
 	)
 	return batch
 
@@ -451,8 +451,13 @@ def release_unpaid_items(item_names):
 			affected.add(row.parent)
 	# Recompute each source batch's total/status now that some items no longer count.
 	for batch_name in affected:
-		frappe.get_doc("Commission Batch Request", batch_name).save(ignore_permissions=True)
-		log_action("Commission Batch Request", batch_name, f"Released unpaid items back to the owed pool: {released}")
+		batch = frappe.get_doc("Commission Batch Request", batch_name)
+		batch.save(ignore_permissions=True)
+		log_action(
+			"Commission Batch Request",
+			batch_name,
+			f"[{batch.title or batch_name}] Released unpaid items back to the owed pool: {released}",
+		)
 	return {"released_items": released, "affected_batches": list(affected)}
 
 
@@ -546,22 +551,67 @@ def render_batch_invoice_pdf(batch_name):
 	Agency-facing, so everything is shown in the batch's own currency (self.currency) --
 	the amounts the foreign agency actually negotiated in. Birr never appears here; it's
 	only the internal income/expense figure, visible in the app's own Finance views."""
+	from agency_tracking.pdf_utils import render_pdf, resolve_file_src
+
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
 	rows = []
-	for item in batch.items:
+	for idx, item in enumerate(batch.items, start=1):
 		if item.status == "Released":
 			continue  # carried into a later batch -- not this invoice's obligation
-		placement_name = frappe.db.get_value("Applicant Transaction", item.transaction, "placement")
+		txn = frappe.db.get_value(
+			"Applicant Transaction", item.transaction, ["placement", "amount_original", "stage_logged_at"], as_dict=True
+		) or {}
+		placement_name = txn.get("placement")
 		applicant_name = frappe.db.get_value("Placement", placement_name, "applicant") if placement_name else None
-		full_name = frappe.db.get_value("Applicant", applicant_name, "full_name") if applicant_name else "—"
-		amount = frappe.db.get_value("Applicant Transaction", item.transaction, "amount_original")
-		rows.append({"full_name": full_name, "amount_original": amount, "status": item.status})
+		applicant = (
+			frappe.db.get_value("Applicant", applicant_name, ["full_name", "passport_number"], as_dict=True)
+			if applicant_name
+			else None
+		)
+		rows.append(
+			{
+				"idx": idx,
+				"full_name": (applicant and applicant.full_name) or "—",
+				"passport_number": applicant and applicant.passport_number,
+				"transaction_date": txn.get("stage_logged_at"),
+				"payment_reference": item.payment_reference,
+				"amount_original": txn.get("amount_original"),
+				"status": item.status,
+			}
+		)
 
-	html = frappe.render_template(
+	contractor = frappe.db.get_value(
+		"Contractor", batch.contractor, ["contractor_name", "license_no", "telephone"], as_dict=True
+	) or {}
+
+	settings = frappe.get_single("Agency Tracking Settings")
+	agency = {
+		"agency_name": settings.agency_name,
+		"agency_address": settings.agency_address,
+		"agency_phone": settings.agency_phone,
+		"logo": resolve_file_src(settings.logo),
+		"stamp_image": resolve_file_src(settings.stamp_image),
+		"bank_name": settings.bank_name,
+		"account_name": settings.account_name,
+		"account_number": settings.account_number,
+		"bank_address": settings.bank_address,
+		"bank_swift_code": settings.bank_swift_code,
+		"bank_phone": settings.bank_phone,
+		"bank_email": settings.bank_email,
+	}
+
+	return render_pdf(
 		"agency_tracking/templates/commission_batch_invoice.html",
-		{"batch": batch, "rows": rows, "contractor_name": frappe.db.get_value("Contractor", batch.contractor, "contractor_name")},
+		{
+			"batch": batch,
+			"rows": rows,
+			"contractor_name": contractor.get("contractor_name"),
+			"contractor_license_no": contractor.get("license_no"),
+			"contractor_telephone": contractor.get("telephone"),
+			"agency": agency,
+			"today": today(),
+		},
 	)
-	return frappe.utils.pdf.get_pdf(html)
 
 
 def _maybe_auto_batch(contractor_name, destination_country):

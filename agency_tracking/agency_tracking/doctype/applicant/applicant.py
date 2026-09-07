@@ -85,23 +85,8 @@ class Applicant(Document):
 	def validate(self):
 		self.set_full_name()
 		self.validate_passport_dates()
-		self.validate_age_limits()
 		self.validate_field_floor()
 		self.validate_uniqueness()
-
-	def validate_age_limits(self):
-		"""Legal labor migration age bounds: candidates must be between 18 and 65 years old."""
-		if self.age is not None:
-			if self.age < 18:
-				frappe.throw(
-					f"Applicant age is {self.age} years. Minimum legal employment age is 18.",
-					frappe.ValidationError,
-				)
-			if self.age > 65:
-				frappe.throw(
-					f"Applicant age is {self.age} years. Maximum legal employment age is 65.",
-					frappe.ValidationError,
-				)
 
 	def validate_passport_dates(self):
 		"""Logical/date-sanity checks (audit G-008): the field floor only checks presence, not that

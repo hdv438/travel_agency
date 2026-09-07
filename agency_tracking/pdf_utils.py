@@ -105,6 +105,39 @@ def resolve_file_src(url):
 	return url
 
 
+def attach_datauri(url):
+	"""Base64 data: URI for a stored Frappe file field (Applicant.photograph, etc.) -- the same
+	technique already used for asset_datauri/code128_b_datauri, extended to user-uploaded
+	attachments. Unlike resolve_file_src's file:// path, this never depends on wkhtmltopdf's own
+	filesystem access at render time (it may run as a different user/sandboxed process that can't
+	read the site's private/files directory even though the path is valid) or on a network fetch
+	for a not-actually-local URL -- the bytes are already inline in the HTML handed to it, so
+	there's nothing left for the renderer to fail to load (and nothing for it to hang retrying).
+	Returns None (never raises) if the value is empty, already a data:/external URL, or the
+	underlying File record can't be found -- callers already treat a missing photo as an
+	empty-state, same as before."""
+	if not url:
+		return None
+	if url.startswith("data:"):
+		return url
+	if url.startswith(("http://", "https://")):
+		# Already independently fetchable (e.g. R2-hosted) -- no local File doc to embed from.
+		return url
+
+	file_name = frappe.db.get_value("File", {"file_url": url}, "name")
+	if not file_name:
+		return None
+	try:
+		file_doc = frappe.get_doc("File", file_name)
+		content = file_doc.get_content()
+	except Exception:
+		frappe.log_error(title="attach_datauri: could not read file", message=f"{url} ({file_name})")
+		return None
+
+	content_type = file_doc.content_type or "image/jpeg"
+	return f"data:{content_type};base64," + base64.b64encode(content).decode()
+
+
 def render_pdf(template, context):
 	"""Render a Jinja template path to PDF bytes via Frappe's standard wkhtmltopdf path."""
 	html = frappe.render_template(template, context)

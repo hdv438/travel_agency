@@ -80,29 +80,10 @@ def _notify_management_of_ban_event(applicant_name, country, ban_name, event, re
 		)
 
 
-CORE_IDENTITY_FIELDS = frozenset({
-	"full_name",
-	"first_name",
-	"middle_name",
-	"last_name",
-	"passport_number",
-	"passport_expiry_date",
-	"date_of_birth",
-	"gender",
-	"destination_country",
-	"entry_track",
-	"nationality",
-})
-
-
 @frappe.whitelist()
 def update_applicant(applicant_name, override_ban=False, override_reason=None, **data):
 	"""Edit an Applicant still at Draft or Registered. Does not change status — use
 	register_applicant for that transition.
-
-	In-flight immutability guard: if the candidate has an active Placement that has advanced
-	into or past Selected (Selected, Processing, Stamped, Ticketed, Departed), core identity,
-	passport, and destination fields are strictly locked against casual modification.
 	"""
 	doc = frappe.get_doc("Applicant", applicant_name)
 	if not doc.has_permission("write"):
@@ -113,26 +94,9 @@ def update_applicant(applicant_name, override_ban=False, override_reason=None, *
 	data.pop("name", None)
 	data.pop("passport_issue_date", None)
 
-	if doc.active_placement:
-		placement_status = frappe.db.get_value("Placement", doc.active_placement, "status")
-		if placement_status in ("Selected", "Processing", "Stamped", "Ticketed", "Departed"):
-			attempted = set(data.keys()) & CORE_IDENTITY_FIELDS
-			if attempted:
-				frappe.throw(
-					f"Cannot modify core identity/corridor fields ({', '.join(sorted(attempted))}) "
-					f"while applicant has an active placement ({doc.active_placement}, status: '{placement_status}').",
-					frappe.ValidationError,
-				)
-
 	new_country = data.get("destination_country")
 	if new_country and new_country != doc.destination_country:
 		_check_country_ban_or_throw(applicant_name, new_country, override_ban, override_reason)
-
-	if "entry_track" in data and data["entry_track"] != doc.entry_track and doc.active_placement:
-		frappe.throw(
-			f"Cannot change entry_track while applicant has an active placement ({doc.active_placement}).",
-			frappe.ValidationError,
-		)
 
 	doc.update(data)
 	if "entry_track" in data and data["entry_track"] != doc.entry_track and doc.status in CYCLE_REGRESSION_STATUSES:
