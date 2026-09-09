@@ -70,6 +70,7 @@ CORRIDORS = {
 def after_install():
 	create_roles()
 	create_corridors()
+	configure_session_expiry()
 
 
 def before_tests():
@@ -117,3 +118,21 @@ def create_corridors():
 					"steps": steps,
 				}
 			).insert(ignore_permissions=True)
+
+
+def configure_session_expiry():
+	"""Sets idle session expiry to 24 hours ('24:00') in System Settings.
+
+	Mirrors patches/set_default_session_expiry_24h.py, which applies the same setting
+	to sites that existed before this was added to after_install().
+	"""
+	try:
+		settings = frappe.get_doc("System Settings")
+		settings.session_expiry = "24:00"
+		settings.flags.ignore_mandatory = True
+		settings.save(ignore_permissions=True)
+	except Exception:
+		frappe.db.set_single_value("System Settings", "session_expiry", "24:00")
+		frappe.defaults.set_global_default("session_expiry", "24:00")
+	frappe.db.commit()
+

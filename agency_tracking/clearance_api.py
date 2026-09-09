@@ -8,7 +8,7 @@ from frappe.utils import formatdate, today
 
 from agency_tracking.clearance_engine import assign_clearance_step as _engine_assign_clearance_step
 from agency_tracking.agency_tracking.doctype.clearance_step.clearance_step import CLEARANCE_ROLE_BY_STEP_TYPE
-from agency_tracking.pdf_utils import asset_datauri, code128_b_datauri, render_pdf, resolve_file_src
+from agency_tracking.pdf_utils import asset_datauri, attach_datauri, code128_b_datauri, render_pdf
 from agency_tracking.roles import INTERNAL_STAFF_ROLES
 from agency_tracking.state_machine import assert_clearance_step_not_terminal, log_action
 
@@ -338,7 +338,7 @@ def set_taeshir_appointment(clearance_step_name=None, appointment_date=None, inj
 	if injaz_application_id:
 		attempt.injaz_application_id = injaz_application_id
 	step.save(ignore_permissions=True)
-	log_action("Clearance Step", step.name, f"Taeshir appointment set: {appointment_date or '-'} / Injaz {injaz_application_id or '-'}")
+	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Taeshir appointment set: {appointment_date or '-'} / Injaz {injaz_application_id or '-'}")
 	return step.as_dict()
 
 
@@ -360,7 +360,7 @@ def reschedule_taeshir_appointment(clearance_step_name=None, new_appointment_dat
 	if cause:
 		attempt.remark = f"Rescheduled: {cause}"
 	step.save(ignore_permissions=True)
-	log_action("Clearance Step", step.name, f"Taeshir appointment rescheduled to {new_appointment_date}" + (f": {cause}" if cause else ""))
+	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Taeshir appointment rescheduled to {new_appointment_date}" + (f": {cause}" if cause else ""))
 	return step.as_dict()
 
 
@@ -383,7 +383,7 @@ def record_injaz_payment(clearance_step_name=None, amount=None, currency=None, r
 	if receipt_number:
 		attempt.receipt_number = receipt_number
 	step.save(ignore_permissions=True)
-	log_action("Clearance Step", step.name, f"Injaz paid: {amount or '-'} {currency or ''} (receipt {receipt_number or '-'})")
+	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Injaz paid: {amount or '-'} {currency or ''} (receipt {receipt_number or '-'})")
 	return step.as_dict()
 
 
@@ -412,7 +412,7 @@ def forfeit_injaz_and_restart(clearance_step_name=None, reason=None, new_appoint
 		 "injaz_application_id": new_injaz_application_id},
 	)
 	step.save(ignore_permissions=True)
-	log_action("Clearance Step", step.name, f"Injaz {prior_outcome or 'restarted'} ({reason}); new attempt {new_injaz_application_id or '-'} on {new_appointment_date or '-'}")
+	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Injaz {prior_outcome or 'restarted'} ({reason}); new attempt {new_injaz_application_id or '-'} on {new_appointment_date or '-'}")
 	return step.as_dict()
 
 
@@ -427,9 +427,14 @@ def _upper(value):
 def _injaz_context(step, placement, applicant):
 	"""Flatten a Clearance Step (+ its Placement + Applicant) into the Saudi Embassy Consular
 	Section (easyenjaz) Injaz visa-application form. Identity/passport come from the Applicant,
-	sponsor/visa from the Placement, and the Injaz/Enjaz application numbers (the two barcodes) from
-	the step/placement. Fields the system doesn't hold (arrival/payment/dependents, etc.) render
-	blank, exactly like the real form before the consulate fills them in."""
+	sponsor/visa/employer/duration from the Placement, and the Injaz/Enjaz application numbers
+	(the two barcodes) from the step/placement. destination is hardcoded ("Kingdom of Saudi
+	Arabia") since render_injaz_pdf only ever runs for a Saudi placement to begin with. Fields the
+	system genuinely doesn't hold (arrival/payment/dependents, etc.) still render blank, exactly
+	like the real form before the consulate fills them in -- 2026-09-07: business_address,
+	duration_of_stay, dealer_name and destination used to be in that blank list too, but the data
+	was already sitting on Placement (employer_address/employment_site, contract_duration,
+	saudi_agency_name) and just wasn't wired in."""
 	nationality = applicant.nationality or "Ethiopia"
 	# Left barcode = the visa number (derived at the Injaz/Taeshir stage from the Application ID).
 	# Right barcode = the Application ID (E-number) captured on the Taeshir step itself.
@@ -444,7 +449,7 @@ def _injaz_context(step, placement, applicant):
 		"right_barcode": code128_b_datauri(application_id),
 		"right_barcode_number": application_id,
 		"sponsor_name": _upper(placement.sponsor_name),
-		"photo_src": resolve_file_src(applicant.photograph),
+		"photo_src": attach_datauri(applicant.photograph),
 		"emblem_src": asset_datauri("templates", "injaz_assets", "mofa_emblem.png"),
 		"agency_full": ORIGIN_AGENCY_FULL,
 		"agency_email": ORIGIN_AGENCY_EMAIL,
@@ -460,23 +465,23 @@ def _injaz_context(step, placement, applicant):
 		"religion": _RELIGION_MAP.get(applicant.religion, applicant.religion) or "",
 		"qualification": _upper(applicant.education),
 		"profession": _upper(applicant.target_job) or "HOUSE WORKER",
-		"home_address": "",
-		"business_address": "",
+		"home_address": _upper(applicant.address),
+		"business_address": _upper(placement.employer_address or placement.employment_site),
 		# ── travel / passport ──
 		"purpose": "Work",
 		"place_of_issue": _upper(applicant.passport_issue_place) or "ADDIS ABABA",
 		"date_of_issue": _fmt_date(applicant.passport_issue_date),
 		"passport_no": applicant.passport_number or "",
 		"date_of_expiry": _fmt_date(applicant.passport_expiry_date),
-		"duration_of_stay": "",
+		"duration_of_stay": placement.contract_duration or "",
 		"date_of_arrival": "",
 		"date_of_departure": "",
 		"mode_of_payment": "",
 		"payment_no": "",
 		"payment_date": "",
 		"relationship": "",
-		"destination": "",
-		"dealer_name": "",
+		"destination": "Kingdom of Saudi Arabia",
+		"dealer_name": _upper(placement.saudi_agency_name),
 		# ── certification / footer ──
 		"cert_date": _fmt_date(today()),
 		"cert_name": _upper(applicant.full_name),
@@ -506,7 +511,7 @@ def render_injaz_pdf(clearance_step_name=None, **kwargs):
 	applicant = frappe.get_doc("Applicant", placement.applicant)
 
 	pdf_bytes = render_pdf(INJAZ_TEMPLATE, _injaz_context(step, placement, applicant))
-	log_action("Clearance Step", step.name, f"Injaz PDF downloaded for {placement.applicant}", event_type="Access")
+	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Injaz PDF downloaded for {applicant.full_name}", event_type="Access")
 	frappe.response["filename"] = f"Injaz_{placement.applicant}.pdf"
 	frappe.response["filecontent"] = pdf_bytes
 	frappe.response["type"] = "download"

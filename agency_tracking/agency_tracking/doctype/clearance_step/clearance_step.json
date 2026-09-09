@@ -6,6 +6,7 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "title",
   "placement",
   "step_type",
   "sequence_order",
@@ -38,6 +39,13 @@
   "payments"
  ],
  "fields": [
+  {
+   "description": "Auto-generated: \"{Step Type} — {Applicant} [{step ID}]\", e.g. \"Embassy — Fatuma Muhammed Abi [CLR-2026-00045]\" -- so this step reads as something other than a bare sequence number in lists, link fields, and notifications. The ID itself never changes; this is purely a readable label kept in sync with it.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "read_only": 1
+  },
   {
    "fieldname": "placement",
    "fieldtype": "Link",
@@ -342,8 +350,9 @@
    "write": 1
   }
  ],
- "search_fields": "placement,step_type,status",
+ "search_fields": "placement,step_type,status,title",
  "sort_field": "sequence_order",
  "sort_order": "ASC",
- "states": []
+ "states": [],
+ "title_field": "title"
 }

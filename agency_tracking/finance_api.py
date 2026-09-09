@@ -328,7 +328,8 @@ def create_commission_batch(
 def write_off_batch(batch_name=None, write_off_amount=None, write_off_reason=None, **kwargs):
 	"""Record an agreed discount on a batch (the agency pays less by negotiation), e.g. a batch
 	invoiced at $5000 where the agency negotiates $1000 off and pays $4000. Books an Expense for
-	the shortfall and, once paid + advance + write-offs cover the total, settles the batch.
+	the shortfall and, once paid + write-offs cover the total, settles the batch (advance is
+	excluded -- see commission_batch_request._apply_settlement_math).
 	Callable multiple times per batch -- each call appends a new write-off row (batch.write_offs)
 	rather than replacing a single field, so a batch can have several negotiated discounts over
 	time, each with its own reason and its own Expense transaction. write_off_amount is in the
@@ -443,13 +444,14 @@ def settle_batch(batch_name, settlement_reference):
 
 @frappe.whitelist()
 def record_batch_advance(batch_name=None, advance_amount=None, advance_reference=None, **kwargs):
-	"""Record a partial/advance payment received from the foreign agency against a commission
-	batch, when they remit less than the full requested total. advance_amount is in the batch's
-	own currency (batch.currency) -- the amount the agency actually sent, same denomination as
-	the invoice. Sets advance_amount_original (+ reference and received-on date); the controller
-	recomputes balance_due and flips an open batch to Partially Settled. A Birr mirror is derived
-	here (at today's FX rate) for internal accounting only. Full settlement still goes through
-	settle_batch / settle_batch_items."""
+	"""Record an advance the agency requested ahead of time against a commission batch --
+	2026-09-07: this is a loan-style ask, not a payment against the batch's own obligation, so it
+	is NOT reconciled against total_amount_original / paid / write-offs (see
+	commission_batch_request._apply_settlement_math) and can't flip the batch toward Settled by
+	itself. advance_amount is in the batch's own currency (batch.currency), same denomination as
+	the invoice. Sets advance_amount_original (+ reference and received-on date); a Birr mirror is
+	derived here (at today's FX rate) for internal accounting only. Full settlement still goes
+	through settle_batch / settle_batch_items."""
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	batch_name = batch_name or kwargs.get("batch") or kwargs.get("name")
@@ -464,18 +466,6 @@ def record_batch_advance(batch_name=None, advance_amount=None, advance_reference
 		frappe.throw("advance_amount must be greater than zero.", frappe.ValidationError)
 
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
-	# Reconcile against per-item payments + all write-offs so total credited can't exceed the
-	# obligation (audit N-1). All in the batch's own currency, same as the invoice.
-	paid_items_original, _ = batch.paid_from_items()
-	write_off_original, _ = batch.write_off_totals()
-	accounted = flt(paid_items_original) + amount + flt(write_off_original)
-	if accounted > flt(batch.total_amount_original):
-		frappe.throw(
-			f"Paid-per-item ({paid_items_original}) + advance ({amount}) + write-offs "
-			f"({write_off_original}) cannot exceed the batch total "
-			f"({batch.total_amount_original or 0}) {batch.currency}. Use settle_batch for a full settlement.",
-			frappe.ValidationError,
-		)
 	fx_rate, _ = _get_fx_rate(batch.currency)
 	batch.advance_amount_original = amount
 	batch.advance_amount = round(flt(amount) * flt(fx_rate), 2)
@@ -486,7 +476,8 @@ def record_batch_advance(batch_name=None, advance_amount=None, advance_reference
 	log_action(
 		"Commission Batch Request",
 		batch.name,
-		f"Advance received: {amount} {batch.currency}" + (f" (ref {advance_reference})" if advance_reference else ""),
+		f"[{batch.title or batch.name}] Advance received: {amount} {batch.currency}"
+		+ (f" (ref {advance_reference})" if advance_reference else ""),
 	)
 	return batch.as_dict()
 

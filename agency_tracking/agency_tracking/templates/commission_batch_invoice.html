@@ -3,52 +3,129 @@
 <head>
 <meta charset="utf-8">
 <style>
-	body { font-family: sans-serif; font-size: 12px; }
-	h1 { font-size: 18px; }
-	table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-	th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
-	th { background: #f0f0f0; }
-	.total { font-weight: bold; text-align: right; margin-top: 8px; }
+	body { font-family: sans-serif; font-size: 12px; color: #111; }
+	.page-break { page-break-before: always; }
+	.letterhead { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+	.letterhead td { border: none; padding: 0; vertical-align: top; }
+	.agency-name { font-size: 22px; color: #1f6fb2; font-weight: bold; }
+	.logo { text-align: right; }
+	.logo img { max-height: 90px; }
+	.meta-line { margin: 2px 0; }
+	.underline { text-decoration: underline; font-style: italic; }
+	table.doc-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+	table.doc-table th, table.doc-table td { border: 1px solid #999; padding: 5px 8px; text-align: left; }
+	table.doc-table th { background: #f0f0f0; }
+	.bar-row td { background: #ffe600; text-align: center; font-weight: bold; padding: 4px; }
+	.amount-col { text-align: right; white-space: nowrap; }
+	.totals-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+	.totals-table td { border: 1px solid #999; padding: 5px 8px; }
+	.totals-table .label { text-align: right; }
+	.totals-table .value { text-align: right; width: 140px; }
+	.totals-table .highlight td { background: #ffe600; font-weight: bold; }
+	.bank-table { width: 60%; border-collapse: collapse; margin-top: 14px; }
+	.bank-table td { border: 1px solid #999; padding: 5px 8px; }
+	.footer { margin-top: 40px; }
+	.footer .stamp { float: right; }
+	.footer .stamp img { max-height: 110px; }
 </style>
 </head>
 <body>
-	<h1>Commission Invoice — {{ batch.name }}</h1>
-	<p>Agency: {{ contractor_name }}<br>Destination: {{ batch.destination_country }}<br>Status: {{ batch.status }}</p>
-	<table>
-		<thead>
-			<tr><th>Applicant</th><th>Amount ({{ batch.currency }})</th><th>Status</th></tr>
-		</thead>
-		<tbody>
-			{% for row in rows %}
-			<tr>
-				<td>{{ row.full_name }}</td>
-				<td>{{ "%.2f"|format(row.amount_original or 0) }}</td>
-				<td>{{ row.status }}</td>
-			</tr>
-			{% endfor %}
-		</tbody>
+
+<!-- Page 1: letterhead, payment request, applicant table, totals, write-offs -->
+<table class="letterhead">
+	<tr>
+		<td>
+			<div class="agency-name">{{ agency.agency_name or "" }}</div>
+			<p class="meta-line underline">FROM: {{ agency.agency_name or "" }}</p>
+			<p class="meta-line">{{ today }}</p>
+			<p class="meta-line">{{ agency.agency_address or "" }}{% if agency.agency_phone %} TEL {{ agency.agency_phone }}{% endif %}</p>
+		</td>
+		<td class="logo">
+			{% if agency.logo %}<img src="{{ agency.logo }}">{% endif %}
+		</td>
+	</tr>
+</table>
+
+<p class="meta-line">
+	<i>{{ contractor_name or "" }}</i><br>
+	{% if contractor_license_no %}License no: {{ contractor_license_no }}{% endif %}
+	{% if contractor_telephone %} Telephone: {{ contractor_telephone }}{% endif %}
+</p>
+
+<p class="meta-line"><strong>Ref: {{ batch.title or batch.name }}</strong></p>
+
+<table class="doc-table">
+	<tr class="bar-row"><td colspan="6">PAYMENT {{ contractor_name or "" }} NO {{ batch.name }}</td></tr>
+	<tr class="bar-row"><td colspan="6">DATE {{ today }}</td></tr>
+	<tr class="bar-row"><td colspan="6">FROM {{ agency.agency_name or "" }} {{ agency.agency_phone or "" }} INVOICE {{ batch.name }} TO {{ contractor_name or "" }}</td></tr>
+	<tr class="bar-row"><td colspan="6">TO {{ contractor_name or "" }} subject: PAYMENT {{ batch.name }} REQUEST</td></tr>
+	<thead>
+		<tr>
+			<th>#</th>
+			<th>Applicant</th>
+			<th>Passport No</th>
+			<th>Date</th>
+			<th>Reference</th>
+			<th>Amount ({{ batch.currency }})</th>
+		</tr>
+	</thead>
+	<tbody>
+		{% for row in rows %}
+		<tr>
+			<td>{{ row.idx }}</td>
+			<td>{{ row.full_name }}</td>
+			<td>{{ row.passport_number or "" }}</td>
+			<td>{{ row.transaction_date or "" }}</td>
+			<td>{{ row.payment_reference or "" }}</td>
+			<td class="amount-col">{{ "%.2f"|format(row.amount_original or 0) }}</td>
+		</tr>
+		{% endfor %}
+	</tbody>
+</table>
+
+<table class="totals-table">
+	<tr class="highlight"><td class="label">TOTAL</td><td class="value">{{ "%.2f"|format(batch.total_amount_original or 0) }} {{ batch.currency }}</td></tr>
+</table>
+
+<div class="footer">
+	<p class="underline">{{ agency.agency_name or "" }}</p>
+	<p>{{ agency.agency_address or "" }}{% if agency.agency_phone %} {{ agency.agency_phone }}{% endif %}</p>
+	{% if agency.stamp_image %}<div class="stamp"><img src="{{ agency.stamp_image }}"></div>{% endif %}
+</div>
+
+<!-- Page 2: letterhead repeated, bank details -->
+<div class="page-break">
+	<table class="letterhead">
+		<tr>
+			<td>
+				<div class="agency-name">{{ agency.agency_name or "" }}</div>
+				<p class="meta-line underline">FROM: {{ agency.agency_name or "" }}</p>
+				<p class="meta-line">{{ today }}</p>
+				<p class="meta-line">{{ agency.agency_address or "" }}{% if agency.agency_phone %} TEL {{ agency.agency_phone }}{% endif %}</p>
+			</td>
+			<td class="logo">
+				{% if agency.logo %}<img src="{{ agency.logo }}">{% endif %}
+			</td>
+		</tr>
 	</table>
-	<p class="total">Original Amount Requested: {{ "%.2f"|format(batch.total_amount_original or 0) }} {{ batch.currency }}</p>
-	<p class="total">Advance Asked: {{ "%.2f"|format(batch.requested_advance_amount or 0) }} {{ batch.currency }}</p>
-	<p class="total">Advance Received: {{ "%.2f"|format(batch.advance_amount_original or 0) }} {{ batch.currency }}</p>
-	<p class="total">Paid (Per-Applicant): {{ "%.2f"|format(batch.paid_amount_original or 0) }} {{ batch.currency }}</p>
-	<p class="total">Total Write-off / Discount: {{ "%.2f"|format(batch.write_off_total_original or 0) }} {{ batch.currency }}</p>
-	{% if batch.write_offs %}
-	<table>
-		<thead>
-			<tr><th>Write-off Date</th><th>Amount ({{ batch.currency }})</th><th>Reason</th></tr>
-		</thead>
-		<tbody>
-			{% for w in batch.write_offs %}
-			<tr>
-				<td>{{ w.write_off_date }}</td>
-				<td>{{ "%.2f"|format(w.amount_original or 0) }}</td>
-				<td>{{ w.reason }}</td>
-			</tr>
-			{% endfor %}
-		</tbody>
+
+	{% if agency.bank_name or agency.account_number %}
+	<table class="bank-table">
+		<tr><td>BANK</td><td>{{ agency.bank_name or "" }}</td></tr>
+		<tr><td>ACCOUNT NAME</td><td>{{ agency.account_name or "" }}</td></tr>
+		<tr><td>ACCOUNT NO</td><td>{{ agency.account_number or "" }}</td></tr>
+		{% if agency.bank_address %}<tr><td>ADDRESS</td><td>{{ agency.bank_address }}</td></tr>{% endif %}
+		{% if agency.bank_phone or agency.bank_email %}<tr><td>CONTACT</td><td>{{ agency.bank_phone or "" }} {{ agency.bank_email or "" }}</td></tr>{% endif %}
+		{% if agency.bank_swift_code %}<tr><td>SWIFT/BIC CODE</td><td>{{ agency.bank_swift_code }}</td></tr>{% endif %}
 	</table>
 	{% endif %}
-	<p class="total">Balance Due: {{ "%.2f"|format(batch.balance_due_original or 0) }} {{ batch.currency }}</p>
+
+	<div class="footer">
+		<p class="underline">{{ agency.agency_name or "" }}</p>
+		<p>{{ agency.agency_address or "" }}{% if agency.agency_phone %} {{ agency.agency_phone }}{% endif %}</p>
+		{% if agency.stamp_image %}<div class="stamp"><img src="{{ agency.stamp_image }}"></div>{% endif %}
+	</div>
+</div>
+
 </body>
 </html>

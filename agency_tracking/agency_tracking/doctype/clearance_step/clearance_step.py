@@ -57,6 +57,19 @@ class ClearanceStep(Document):
 				"A rejection remark is required when an Embassy step is Rejected.",
 				frappe.ValidationError,
 			)
+		self._set_title()
+
+	def _set_title(self):
+		"""'{Step Type} — {Applicant} [{step ID}]', e.g. 'Embassy — Fatuma Muhammed Abi
+		[CLR-2026-00045]' -- so this step reads as something other than a bare sequence number
+		everywhere it shows up (lists, link fields, notifications). self.name is already assigned
+		by the time validate() runs (autoname happens before the before_save hooks)."""
+		applicant_name = frappe.db.get_value("Placement", self.placement, "applicant") if self.placement else None
+		full_name = frappe.db.get_value("Applicant", applicant_name, "full_name") if applicant_name else None
+		if self.step_type and full_name and self.name:
+			self.title = f"{self.step_type} — {full_name} [{self.name}]"
+		else:
+			self.title = self.name
 
 	def before_save(self):
 		from agency_tracking.storage_engine import migrate_attach_to_r2

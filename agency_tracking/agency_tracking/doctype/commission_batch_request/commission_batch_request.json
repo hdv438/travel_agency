@@ -6,6 +6,7 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "title",
   "contractor",
   "destination_country",
   "currency",
@@ -33,6 +34,13 @@
   "settled_on"
  ],
  "fields": [
+  {
+   "description": "Auto-generated: \"{Contractor} [{batch ID}]\" -- so this batch is recognizable at a glance in lists, link fields, invoices, and notifications, without having to remember what CBR-2026-00021 refers to. The ID itself never changes; this is purely a readable label kept in sync with it.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "read_only": 1
+  },
   {
    "fieldname": "contractor",
    "fieldtype": "Link",
@@ -250,8 +258,9 @@
    "write": 1
   }
  ],
- "search_fields": "contractor,destination_country,status",
+ "search_fields": "contractor,destination_country,status,title",
  "sort_field": "creation",
  "sort_order": "DESC",
- "states": []
+ "states": [],
+ "title_field": "title"
 }
