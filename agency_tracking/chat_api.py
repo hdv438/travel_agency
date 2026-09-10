@@ -143,12 +143,20 @@ def list_all_threads():
 		fields=["name", "thread_type", "contractor", "context_type", "context_reference", "last_message_at", "creation"],
 		order_by="last_message_at desc, creation desc",
 	)
-	for t in threads:
-		t["participants"] = frappe.get_all(
+	# Batch-fetch every thread's participants in 1 query instead of 1 query per thread (was N+1).
+	thread_names = [t["name"] for t in threads]
+	participants_by_thread = {}
+	if thread_names:
+		rows = frappe.get_all(
 			"Chat Thread Participant",
-			filters={"parent": t["name"]},
-			pluck="user",
+			filters={"parent": ["in", thread_names]},
+			fields=["parent", "user"],
 		)
+		for r in rows:
+			participants_by_thread.setdefault(r.parent, []).append(r.user)
+
+	for t in threads:
+		t["participants"] = participants_by_thread.get(t["name"], [])
 	return threads
 
 

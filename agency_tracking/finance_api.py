@@ -396,19 +396,49 @@ def get_commission_batch(batch_name=None, **kwargs):
 	if not batch_name or not frappe.db.exists("Commission Batch Request", batch_name):
 		frappe.throw("A valid batch_name is required.", frappe.ValidationError)
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
+
+	# Batch-fetch transaction -> placement -> applicant -> full_name in 3 queries total instead
+	# of up to 5 per item row (was N+1 -- see raw.md / the perf pass this came out of).
+	txn_names = [row.transaction for row in batch.items]
+	txn_by_name = {}
+	if txn_names:
+		txns = frappe.get_all(
+			"Applicant Transaction",
+			filters={"name": ["in", txn_names]},
+			fields=["name", "placement", "amount_original", "amount_birr"],
+		)
+		txn_by_name = {t.name: t for t in txns}
+
+	placement_names = list({t.placement for t in txn_by_name.values() if t.placement})
+	applicant_by_placement = {}
+	if placement_names:
+		placements = frappe.get_all(
+			"Placement", filters={"name": ["in", placement_names]}, fields=["name", "applicant"]
+		)
+		applicant_by_placement = {p.name: p.applicant for p in placements}
+
+	applicant_names = list({a for a in applicant_by_placement.values() if a})
+	full_name_by_applicant = {}
+	if applicant_names:
+		applicants = frappe.get_all(
+			"Applicant", filters={"name": ["in", applicant_names]}, fields=["name", "full_name"]
+		)
+		full_name_by_applicant = {a.name: a.full_name for a in applicants}
+
 	items = []
 	for row in batch.items:
-		placement = frappe.db.get_value("Applicant Transaction", row.transaction, "placement")
-		applicant = frappe.db.get_value("Placement", placement, "applicant") if placement else None
+		txn = txn_by_name.get(row.transaction)
+		placement = txn.placement if txn else None
+		applicant = applicant_by_placement.get(placement) if placement else None
 		items.append(
 			{
 				"item": row.name,
 				"transaction": row.transaction,
 				"placement": placement,
 				"applicant": applicant,
-				"full_name": frappe.db.get_value("Applicant", applicant, "full_name") if applicant else None,
-				"amount_original": frappe.db.get_value("Applicant Transaction", row.transaction, "amount_original"),
-				"amount_birr": frappe.db.get_value("Applicant Transaction", row.transaction, "amount_birr"),
+				"full_name": full_name_by_applicant.get(applicant) if applicant else None,
+				"amount_original": txn.amount_original if txn else None,
+				"amount_birr": txn.amount_birr if txn else None,
 				"status": row.status,
 				"original_batch": row.get("original_batch"),
 			}

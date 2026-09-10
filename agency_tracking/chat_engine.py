@@ -145,18 +145,34 @@ def get_placement_officers(placement_name):
 	if not frappe.has_permission("Placement", "read", doc=placement_name):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	steps = frappe.get_all("Clearance Step", filters={"placement": placement_name}, fields=["step_type", "name"])
+
+	# Batch-fetch open ToDos for every step, then every allocated user's full_name, in 2 queries
+	# total instead of a query-per-step plus a query-per-ToDo (was a nested N+1).
+	step_names = [s.name for s in steps]
+	todos_by_step = {}
+	if step_names:
+		todos = frappe.get_all(
+			"ToDo",
+			filters={"reference_type": "Clearance Step", "reference_name": ["in", step_names], "status": "Open"},
+			fields=["reference_name", "allocated_to"],
+		)
+		for t in todos:
+			todos_by_step.setdefault(t.reference_name, []).append(t.allocated_to)
+
+	user_names = list({u for users in todos_by_step.values() for u in users})
+	full_name_by_user = {}
+	if user_names:
+		users = frappe.get_all("User", filters={"name": ["in", user_names]}, fields=["name", "full_name"])
+		full_name_by_user = {u.name: u.full_name for u in users}
+
 	officers = []
 	for step in steps:
-		for t in frappe.get_all(
-			"ToDo",
-			filters={"reference_type": "Clearance Step", "reference_name": step.name, "status": "Open"},
-			fields=["allocated_to"],
-		):
+		for allocated_to in todos_by_step.get(step.name, []):
 			officers.append(
 				{
 					"step_type": step.step_type,
-					"user": t.allocated_to,
-					"full_name": frappe.db.get_value("User", t.allocated_to, "full_name"),
+					"user": allocated_to,
+					"full_name": full_name_by_user.get(allocated_to),
 				}
 			)
 	return officers
