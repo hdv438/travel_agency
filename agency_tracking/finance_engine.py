@@ -551,7 +551,7 @@ def render_batch_invoice_pdf(batch_name):
 	Agency-facing, so everything is shown in the batch's own currency (self.currency) --
 	the amounts the foreign agency actually negotiated in. Birr never appears here; it's
 	only the internal income/expense figure, visible in the app's own Finance views."""
-	from agency_tracking.pdf_utils import render_pdf, resolve_file_src
+	from agency_tracking.pdf_utils import attach_datauri, render_pdf
 
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
 
@@ -637,8 +637,8 @@ def render_batch_invoice_pdf(batch_name):
 		"agency_name": settings.agency_name,
 		"agency_address": settings.agency_address,
 		"agency_phone": settings.agency_phone,
-		"logo": resolve_file_src(settings.logo),
-		"stamp_image": resolve_file_src(settings.stamp_image),
+		"logo": attach_datauri(settings.logo),
+		"stamp_image": attach_datauri(settings.stamp_image),
 		"bank_name": settings.bank_name,
 		"account_name": settings.account_name,
 		"account_number": settings.account_number,
