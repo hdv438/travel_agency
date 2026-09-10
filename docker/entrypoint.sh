@@ -58,6 +58,13 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}"
 export PORT="${PORT:-8080}"
 export SITES_PATH="/home/frappe/bench/sites"
 export GUNICORN_WORKERS="${GUNICORN_WORKERS:-4}"
+# gthread workers (not sync): PDF generation (wkhtmltopdf) and document parsing (tesseract/
+# PyMuPDF) all shell out to a subprocess and block waiting on it -- that blocking call releases
+# the GIL, so extra threads within the same worker process can keep serving other requests
+# while one thread sits blocked on a slow subprocess, instead of that request fully occupying
+# an entire worker (see raw.md-adjacent perf notes: this was the root cause of "N slow PDF/OCR
+# requests starve the whole site" under concurrent load, with only 4 sync workers total before).
+export GUNICORN_THREADS="${GUNICORN_THREADS:-4}"
 export GUNICORN_BIND_ARGS="--bind 0.0.0.0:${PORT}"
 if [ "$PORT" != "8000" ]; then
   export GUNICORN_BIND_ARGS="${GUNICORN_BIND_ARGS} --bind 0.0.0.0:8000"
@@ -67,6 +74,7 @@ echo "Site Target Domain : $SITE_NAME"
 echo "Database Target    : $DB_USER@$DB_HOST:$DB_PORT/$DB_NAME (Root: $DB_ROOT_USER)"
 echo "HTTP Port          : $PORT"
 echo "Gunicorn Workers   : $GUNICORN_WORKERS"
+echo "Gunicorn Threads   : $GUNICORN_THREADS"
 echo "Gunicorn Bind Args : $GUNICORN_BIND_ARGS"
 
 if [ -z "$DB_HOST" ]; then
