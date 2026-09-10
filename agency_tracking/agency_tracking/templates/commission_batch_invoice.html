@@ -84,7 +84,22 @@
 </table>
 
 <table class="totals-table">
-	<tr class="highlight"><td class="label">TOTAL</td><td class="value">{{ "%.2f"|format(batch.total_amount_original or 0) }} {{ batch.currency }}</td></tr>
+	<tr><td class="label">Batch Total</td><td class="value">{{ "%.2f"|format(batch.total_amount_original or 0) }} {{ batch.currency }}</td></tr>
+	<tr>
+		<td class="label">Advance / السلفة</td>
+		<td class="value">
+			{% if batch.requested_advance_amount %}{{ "%.2f"|format(batch.requested_advance_amount) }} {{ batch.currency }}
+			{% else %}No advance requested / لم يتم طلب سلفة{% endif %}
+		</td>
+	</tr>
+	<tr>
+		<td class="label">Unpaid from previous batches / غير مسدد من دفعات سابقة</td>
+		<td class="value">
+			{% if previous_unpaid_original %}{{ "%.2f"|format(previous_unpaid_original) }} {{ batch.currency }}
+			{% else %}None / لا يوجد{% endif %}
+		</td>
+	</tr>
+	<tr class="highlight"><td class="label">TOTAL</td><td class="value">{{ "%.2f"|format((batch.total_amount_original or 0) + (batch.requested_advance_amount or 0) + (previous_unpaid_original or 0)) }} {{ batch.currency }}</td></tr>
 </table>
 
 <div class="footer">

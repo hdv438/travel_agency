@@ -554,28 +554,53 @@ def render_batch_invoice_pdf(batch_name):
 	from agency_tracking.pdf_utils import render_pdf, resolve_file_src
 
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
-	rows = []
-	for idx, item in enumerate(batch.items, start=1):
-		if item.status == "Released":
-			continue  # carried into a later batch -- not this invoice's obligation
-		txn = frappe.db.get_value(
-			"Applicant Transaction", item.transaction, ["placement", "amount_original", "stage_logged_at"], as_dict=True
-		) or {}
-		placement_name = txn.get("placement")
-		applicant_name = frappe.db.get_value("Placement", placement_name, "applicant") if placement_name else None
-		applicant = (
-			frappe.db.get_value("Applicant", applicant_name, ["full_name", "passport_number"], as_dict=True)
-			if applicant_name
-			else None
+
+	# idx numbering is 1-based over ALL items (Released ones included in the count, just not
+	# appended below) -- preserved as-is, only the lookups are batched.
+	included_items = [(idx, item) for idx, item in enumerate(batch.items, start=1) if item.status != "Released"]
+
+	# Batch-fetch transaction -> placement -> applicant in 3 queries total instead of up to 3
+	# per row (was N+1 -- see raw.md / the perf pass this came out of).
+	txn_names = [item.transaction for _, item in included_items]
+	txn_by_name = {}
+	if txn_names:
+		txns = frappe.get_all(
+			"Applicant Transaction",
+			filters={"name": ["in", txn_names]},
+			fields=["name", "placement", "amount_original", "stage_logged_at"],
 		)
+		txn_by_name = {t.name: t for t in txns}
+
+	placement_names = list({t.placement for t in txn_by_name.values() if t.placement})
+	applicant_by_placement = {}
+	if placement_names:
+		placements = frappe.get_all(
+			"Placement", filters={"name": ["in", placement_names]}, fields=["name", "applicant"]
+		)
+		applicant_by_placement = {p.name: p.applicant for p in placements}
+
+	applicant_names = list({a for a in applicant_by_placement.values() if a})
+	applicant_by_name = {}
+	if applicant_names:
+		applicants = frappe.get_all(
+			"Applicant", filters={"name": ["in", applicant_names]}, fields=["name", "full_name", "passport_number"]
+		)
+		applicant_by_name = {a.name: a for a in applicants}
+
+	rows = []
+	for idx, item in included_items:
+		txn = txn_by_name.get(item.transaction)
+		placement_name = txn.placement if txn else None
+		applicant_name = applicant_by_placement.get(placement_name) if placement_name else None
+		applicant = applicant_by_name.get(applicant_name) if applicant_name else None
 		rows.append(
 			{
 				"idx": idx,
 				"full_name": (applicant and applicant.full_name) or "—",
 				"passport_number": applicant and applicant.passport_number,
-				"transaction_date": txn.get("stage_logged_at"),
+				"transaction_date": txn.stage_logged_at if txn else None,
 				"payment_reference": item.payment_reference,
-				"amount_original": txn.get("amount_original"),
+				"amount_original": txn.amount_original if txn else None,
 				"status": item.status,
 			}
 		)
@@ -583,6 +608,29 @@ def render_batch_invoice_pdf(batch_name):
 	contractor = frappe.db.get_value(
 		"Contractor", batch.contractor, ["contractor_name", "license_no", "telephone"], as_dict=True
 	) or {}
+
+	# 2026-09-09: TOTAL on the printed invoice is now batch total + requested advance (an
+	# up-front "pay this ASAP" ask, not yet received -- see create_commission_batch's
+	# requested_advance_amount) + an arrears carry-forward from the contractor's other still-open
+	# batches in the same currency. This is print-only -- it doesn't touch balance_due_original,
+	# which stays just this batch's own total minus paid/write-offs.
+	from frappe.utils import flt
+
+	previous_unpaid_original = flt(
+		(
+			frappe.get_all(
+				"Commission Batch Request",
+				filters={
+					"contractor": batch.contractor,
+					"currency": batch.currency,
+					"name": ["!=", batch.name],
+					"status": ["in", ["Sent", "Partially Settled"]],
+				},
+				fields=["sum(balance_due_original) as total"],
+			)
+			or [{}]
+		)[0].get("total")
+	)
 
 	settings = frappe.get_single("Agency Tracking Settings")
 	agency = {
@@ -610,6 +658,7 @@ def render_batch_invoice_pdf(batch_name):
 			"contractor_telephone": contractor.get("telephone"),
 			"agency": agency,
 			"today": today(),
+			"previous_unpaid_original": previous_unpaid_original,
 		},
 	)
 
