@@ -6,6 +6,7 @@
 
 import base64
 import io
+import mimetypes
 import os
 
 import frappe
@@ -134,7 +135,12 @@ def attach_datauri(url):
 		frappe.log_error(title="attach_datauri: could not read file", message=f"{url} ({file_name})")
 		return None
 
-	content_type = file_doc.content_type or "image/jpeg"
+	# File.content_type is never a persisted field (frappe/core/doctype/file/file.py only sets
+	# it as a transient in-memory attribute during the original upload hook) -- a document
+	# reloaded via frappe.get_doc, as both callers here always do, never has it and raises
+	# AttributeError. mimetypes.guess_type is the same fallback Frappe's own file-serving code
+	# uses (frappe/utils/response.py).
+	content_type = mimetypes.guess_type(file_doc.file_name)[0] or "image/jpeg"
 	return f"data:{content_type};base64," + base64.b64encode(content).decode()
 
 
@@ -168,7 +174,12 @@ def embed_image_datauri(url, max_dimension=1000, jpeg_quality=82):
 		frappe.log_error(title="embed_image_datauri: could not read file", message=f"{url} ({file_name})")
 		return None
 
-	content_type = file_doc.content_type or "image/jpeg"
+	# File.content_type is never a persisted field (frappe/core/doctype/file/file.py only sets
+	# it as a transient in-memory attribute during the original upload hook) -- a document
+	# reloaded via frappe.get_doc, as both callers here always do, never has it and raises
+	# AttributeError. mimetypes.guess_type is the same fallback Frappe's own file-serving code
+	# uses (frappe/utils/response.py).
+	content_type = mimetypes.guess_type(file_doc.file_name)[0] or "image/jpeg"
 	try:
 		from PIL import Image
 
