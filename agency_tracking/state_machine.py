@@ -178,7 +178,7 @@ STAGE_GATES = {}
 TRANSITION_SIDE_EFFECTS = {}
 
 
-def transition(doc, new_status, actor=None, override=False, override_reason=None, remarks=None):
+def transition(doc, new_status, actor=None, override=False, override_reason=None, remarks=None, ignore_permissions=False):
 	"""The only sanctioned status-change path. Validates the move is a legal edge for this
 	doctype, runs any registered gate, commits the change (which re-triggers the doctype's
 	own validate() against the new status), logs a Process Event, and returns the saved doc.
@@ -193,6 +193,12 @@ def transition(doc, new_status, actor=None, override=False, override_reason=None
 	remarks: recorded on the Process Event same as override_reason, but for plain (non-gated)
 	transitions that still want a reason on the audit trail -- e.g. cancel_applicant's written
 	cancellation reason, which isn't an override of anything.
+
+	ignore_permissions: for a transition the *system* decides to make as a consequence of some
+	other action (see auto_advance_placement_if_ready) rather than one the caller's own session
+	is personally allowed to make on the doc directly -- e.g. a Taeshir officer completing their
+	step shouldn't need Placement-write permission themselves just because that happened to be
+	the last mandatory step. Every existing caller keeps the default (permission-checked) behavior.
 	"""
 	current_status = doc.status
 	allowed = ALLOWED_TRANSITIONS.get(doc.doctype, set())
@@ -229,7 +235,7 @@ def transition(doc, new_status, actor=None, override=False, override_reason=None
 
 	actor = actor or frappe.session.user
 	doc.status = new_status
-	doc.save()
+	doc.save(ignore_permissions=ignore_permissions)
 
 	frappe.get_doc(
 		{
@@ -359,6 +365,44 @@ def all_mandatory_clearance_steps_complete(placement):
 
 
 STAGE_GATES[("Processing", "Stamped")] = all_mandatory_clearance_steps_complete
+
+
+# --- Auto-advance Processing -> Stamped (2026-09-10) ---
+# Nothing used to notice when the *last* mandatory Clearance Step finished -- a Placement could
+# have LMIS Issued, Taeshir Complete, and Embassy Stamped and still sit in Processing forever,
+# because advancing it was a fully separate manual call nobody was prompted to make (the cause
+# of the PLM-00016 confusion: Embassy alone reaching Stamped looked like progress, but the
+# Placement's own status never moved). Call this after ANY mandatory Clearance Step reaches its
+# own done status, regardless of which step type it is or what order they finish in -- it's a
+# no-op unless this really was the last piece.
+# Process Event.actor is a mandatory Link to User -- there's no "system user" record to point
+# at, so "Administrator" (guaranteed to exist on every site) is the actor of record, with
+# remarks distinguishing this from an actual Administrator click.
+AUTO_ADVANCE_ACTOR = "Administrator"
+AUTO_ADVANCE_REMARKS = "Auto-advanced: all mandatory Clearance Steps are complete."
+
+
+def auto_advance_placement_if_ready(placement_name):
+	"""Best-effort: never raises into the caller. The Clearance Step that triggered this call
+	already saved successfully -- a failure here should be logged for a Manager to advance by
+	hand, not unwind real work that already happened."""
+	try:
+		placement = frappe.get_doc("Placement", placement_name)
+		if placement.status != "Processing":
+			return
+		if all_mandatory_clearance_steps_complete(placement) is not True:
+			return
+		# ignore_permissions=True: the officer who happened to complete the last mandatory step
+		# (e.g. Taeshir) isn't necessarily who Placement-write permission would be checked
+		# against -- this is a system-driven consequence of their action, not their own edit.
+		transition(
+			placement, "Stamped", actor=AUTO_ADVANCE_ACTOR, remarks=AUTO_ADVANCE_REMARKS, ignore_permissions=True
+		)
+	except Exception:
+		frappe.log_error(
+			title="Auto-advance Processing->Stamped failed",
+			message=f"{placement_name}: {frappe.get_traceback()}",
+		)
 
 
 # --- Ticket-recorded gate (2026-08-30, backend-issues #05) ---

@@ -236,9 +236,10 @@ def advance_placement(placement_name=None, new_status=None, override_reason=None
 	(business-workflow-srs.md: "always with a written reason") — transition() itself enforces
 	the Manager/Admin role check and that the reason is non-empty.
 
-	This is the direct/manual path. The real auto-chain (LMIS -> Ticketing -> Departure,
-	corridor-completion gating Processing -> Stamped) is Step 7, once Clearance Step exists to
-	drive and gate against.
+	This is the direct/manual path -- Processing -> Stamped can also happen on its own via
+	state_machine.auto_advance_placement_if_ready() once every mandatory Clearance Step is
+	done, so a caller here may find the placement already at new_status by the time they ask
+	(idempotent no-op below), not just already-in-that-state from a repeated click.
 	"""
 	placement_name = placement_name or kwargs.get("placement") or kwargs.get("name")
 	new_status = new_status or kwargs.get("status") or kwargs.get("target_status")
@@ -260,6 +261,9 @@ def advance_placement(placement_name=None, new_status=None, override_reason=None
 		or is_assigned_to_placement(frappe.session.user, placement_name)
 	):
 		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	if placement.status == new_status:
+		return placement.as_dict()
 
 	return transition(
 		placement, new_status, override=bool(override_reason), override_reason=override_reason

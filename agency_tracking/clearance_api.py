@@ -10,7 +10,7 @@ from agency_tracking.clearance_engine import assign_clearance_step as _engine_as
 from agency_tracking.agency_tracking.doctype.clearance_step.clearance_step import CLEARANCE_ROLE_BY_STEP_TYPE
 from agency_tracking.pdf_utils import asset_datauri, code128_b_datauri, embed_image_datauri, render_pdf
 from agency_tracking.roles import INTERNAL_STAFF_ROLES
-from agency_tracking.state_machine import assert_clearance_step_not_terminal, log_action
+from agency_tracking.state_machine import assert_clearance_step_not_terminal, auto_advance_placement_if_ready, log_action
 
 INJAZ_TEMPLATE = "templates/injaz_document.html"
 # The sending (Ethiopian) agency named at the top of the Injaz application header, and the contact
@@ -117,6 +117,7 @@ def complete_clearance_step(
 		step.payment_status = "Paid"
 	step.save(ignore_permissions=True)
 	_close_open_todos(clearance_step_name)
+	auto_advance_placement_if_ready(step.placement)
 	return step.as_dict()
 
 
@@ -181,6 +182,14 @@ def submit_embassy_step(clearance_step_name=None, **kwargs):
 	return step.as_dict()
 
 
+def _taeshir_status_for_placement(placement_name):
+	return frappe.db.get_value(
+		"Clearance Step",
+		{"placement": placement_name, "step_type": "Taeshir"},
+		"status",
+	)
+
+
 @frappe.whitelist()
 def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 	"""Documents returned stamped (Thursday) -- the success outcome."""
@@ -194,6 +203,19 @@ def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 	# S-2: documents can only be Stamped after they were Submitted (the Mon->Thu cycle).
 	if step.status != "Submitted":
 		frappe.throw(f"Documents must be Submitted before they can be Stamped (this step is '{step.status}').", frappe.ValidationError)
+	# Saudi corridor only: Taeshir runs in parallel with Embassy, but Embassy may not be
+	# Stamped (the terminal, success outcome) until Taeshir is done -- Submitted stays
+	# allowed regardless, so documents can still go out Monday even if Taeshir is lagging.
+	# Taeshir has exactly one terminal status ("Complete" -- it's not in
+	# TERMINAL_STATUS_BY_STEP_TYPE so complete_clearance_step() always falls through to
+	# DEFAULT_TERMINAL_STATUS; nothing ever sets a Taeshir step to Issued/Stamped/Rejected).
+	if step.step_type == "Embassy":
+		taeshir_status = _taeshir_status_for_placement(step.placement)
+		if taeshir_status != "Complete":
+			frappe.throw(
+				f"Taeshir must be complete before the Embassy step can be Stamped (Taeshir is '{taeshir_status or 'not started'}').",
+				frappe.ValidationError,
+			)
 	step.status = "Stamped"
 	step.date_completed = today()
 	step.completed_by = frappe.session.user
@@ -201,6 +223,7 @@ def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 		step.reference_no = reference_no
 	step.save(ignore_permissions=True)
 	_close_open_todos(clearance_step_name)
+	auto_advance_placement_if_ready(step.placement)
 	return step.as_dict()
 
 
