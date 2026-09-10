@@ -84,7 +84,7 @@
     },
     {
       "name": "Reports",
-      "description": "Management/Admin visibility — daily/staff/financial/aging/operations reports"
+      "description": "Management/Admin visibility \u2014 daily/staff/financial/aging/operations reports"
     },
     {
       "name": "Clearance Steps",
@@ -117,6 +117,18 @@
     {
       "name": "CV Generation",
       "description": "Official Agency CV PDF generation"
+    },
+    {
+      "name": "Employees & Identity",
+      "description": "Staff/employee account management -- create, list, role assignment, enable/disable, password reset"
+    },
+    {
+      "name": "System",
+      "description": "Liveness/readiness probe for uptime monitors"
+    },
+    {
+      "name": "Documents & Storage",
+      "description": "Object-storage (S3/Wasabi/local) connectivity check for Storage Settings"
     }
   ],
   "paths": {
@@ -4745,7 +4757,7 @@
         "tags": [
           "Reports"
         ],
-        "summary": "CVs created, medicals processed, clearances issued, embassies cleared, tickets booked, departures — for a date range",
+        "summary": "CVs created, medicals processed, clearances issued, embassies cleared, tickets booked, departures \u2014 for a date range",
         "description": "business-workflow-srs.md Part 8's exact list.",
         "x-roles": [
           "Manager",
@@ -6572,7 +6584,7 @@
     "/api/method/agency_tracking.chat_api.list_all_threads": {
       "post": {
         "tags": [
-          "Chat & Communication"
+          "Chat"
         ],
         "summary": "List all active chat threads for the current user",
         "description": "Lists all conversation threads (placement, corridor, complaint, or direct) accessible to the calling session user.",
@@ -6989,7 +7001,7 @@
     "/api/method/agency_tracking.portal_api.get_candidate_detail": {
       "post": {
         "tags": [
-          "Portal"
+          "Portal (Foreign Agency)"
         ],
         "summary": "Get non-PII catalog candidate detail for foreign agency",
         "description": "Returns rich profile (video, skills matrix, physical attributes, salary expectation) scoped to the foreign agency's destination country.",
@@ -7025,7 +7037,7 @@
     "/api/method/agency_tracking.portal_api.list_my_placements": {
       "post": {
         "tags": [
-          "Portal"
+          "Portal (Foreign Agency)"
         ],
         "summary": "List placements owned by the calling foreign agency",
         "description": "Returns reserved and active candidate placements belonging to the foreign agency session.",
@@ -7132,6 +7144,248 @@
           },
           "404": {
             "description": "No photo / candidate not found"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.finance_api.get_owed_commissions_by_currency": {
+      "post": {
+        "tags": [
+          "Finance"
+        ],
+        "summary": "List a contractor's owed commissions grouped by currency",
+        "description": "Owed commissions grouped by currency -- what a \"create a batch\" screen should show, since a batch/invoice is always single-currency and a contractor's rate table can price different tracks/genders differently.",
+        "x-roles": [
+          "Finance Manager",
+          "Admin",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "contractor",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "destination_country",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Defaults to the Contractor's own country field if omitted. Returns {} if it still can't be determined."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "description": "Keyed by currency code (e.g. \"USD\", \"SAR\"); each value is the same row shape as get_owed_commissions.",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "placement": {
+                          "type": "string"
+                        },
+                        "amount_original": {
+                          "type": "number"
+                        },
+                        "currency_original": {
+                          "type": "string"
+                        },
+                        "amount_birr": {
+                          "type": "number"
+                        },
+                        "creation": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.finance_api.list_transactions": {
+      "post": {
+        "tags": [
+          "Finance"
+        ],
+        "summary": "Applicant Transaction history across every status",
+        "description": "Applicant Transaction history across every status (Pending/Approved/Rejected/Voided) -- unlike get_pending_approval_queue (report_api.py), which only ever shows Pending. Surfaces who acted on each row: approved_by/approved_on for Approved, rejection_reason for Rejected, logged_by for who originally created it. from_date/to_date filter on creation date (inclusive).",
+        "x-roles": [
+          "Finance Manager",
+          "Admin",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "enum": [
+              "Pending",
+              "Approved",
+              "Rejected",
+              "Voided"
+            ]
+          },
+          {
+            "name": "transaction_type",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "enum": [
+              "Commission",
+              "Refund",
+              "Income",
+              "Expense"
+            ]
+          },
+          {
+            "name": "placement",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "applicant",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "from_date",
+            "in": "formData",
+            "type": "string",
+            "format": "date",
+            "required": false
+          },
+          {
+            "name": "to_date",
+            "in": "formData",
+            "type": "string",
+            "format": "date",
+            "required": false
+          },
+          {
+            "name": "order_by",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "default": "creation desc"
+          },
+          {
+            "name": "limit_page_length",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 100
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "applicant": {
+                        "type": "string"
+                      },
+                      "placement": {
+                        "type": "string"
+                      },
+                      "transaction_type": {
+                        "type": "string"
+                      },
+                      "stage_logged_at": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "amount_original": {
+                        "type": "number"
+                      },
+                      "currency_original": {
+                        "type": "string"
+                      },
+                      "amount_birr": {
+                        "type": "number"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "logged_by": {
+                        "type": "string"
+                      },
+                      "approved_by": {
+                        "type": "string"
+                      },
+                      "approved_on": {
+                        "type": "string"
+                      },
+                      "rejection_reason": {
+                        "type": "string"
+                      },
+                      "commission_batch_request": {
+                        "type": "string"
+                      },
+                      "creation": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
           }
         },
         "security": [
