@@ -138,6 +138,57 @@ def attach_datauri(url):
 	return f"data:{content_type};base64," + base64.b64encode(content).decode()
 
 
+def embed_image_datauri(url, max_dimension=1000, jpeg_quality=82):
+	"""Same file-resolution/reliability contract as attach_datauri (never raises, same None/
+	passthrough rules for empty/data:/http(s) values) but downsizes the image first if it's
+	larger than max_dimension on either side.
+
+	2026-09-10: CV/Injaz PDFs embed 1-3 user-uploaded photos (phone-camera originals, routinely
+	several MB / multi-thousand-px) with no resizing anywhere in the upload path -- every PDF
+	render then makes wkhtmltopdf decode and downscale each one from scratch just to display it
+	at a few hundred px, which is the dominant cost of those two documents (the invoice, by
+	contrast, only ever embeds the agency's own small pre-sized logo/stamp -- nothing
+	user-uploaded -- which is why it's fast). Re-encoding as JPEG only kicks in when a resize
+	actually happened, so an already-small/optimized image is returned untouched -- no repeated
+	quality loss on something that didn't need it."""
+	if not url:
+		return None
+	if url.startswith("data:"):
+		return url
+	if url.startswith(("http://", "https://")):
+		return url
+
+	file_name = frappe.db.get_value("File", {"file_url": url}, "name")
+	if not file_name:
+		return None
+	try:
+		file_doc = frappe.get_doc("File", file_name)
+		content = file_doc.get_content()
+	except Exception:
+		frappe.log_error(title="embed_image_datauri: could not read file", message=f"{url} ({file_name})")
+		return None
+
+	content_type = file_doc.content_type or "image/jpeg"
+	try:
+		from PIL import Image
+
+		img = Image.open(io.BytesIO(content))
+		if img.width > max_dimension or img.height > max_dimension:
+			img.thumbnail((max_dimension, max_dimension), Image.LANCZOS)
+			if img.mode not in ("RGB", "L"):
+				img = img.convert("RGB")
+			buf = io.BytesIO()
+			img.save(buf, format="JPEG", quality=jpeg_quality, optimize=True)
+			content = buf.getvalue()
+			content_type = "image/jpeg"
+	except Exception:
+		# Best-effort -- an unresizable/corrupt image still embeds at its original size rather
+		# than showing an empty-state placeholder for a file that does exist.
+		frappe.log_error(title="embed_image_datauri: resize failed, embedding original", message=f"{url} ({file_name})")
+
+	return f"data:{content_type};base64," + base64.b64encode(content).decode()
+
+
 def render_pdf(template, context):
 	"""Render a Jinja template path to PDF bytes via Frappe's standard wkhtmltopdf path."""
 	html = frappe.render_template(template, context)

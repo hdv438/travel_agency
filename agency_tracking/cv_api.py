@@ -5,7 +5,7 @@
 
 import frappe
 
-from agency_tracking.pdf_utils import render_pdf, resolve_file_src
+from agency_tracking.pdf_utils import embed_image_datauri, render_pdf
 from agency_tracking.roles import INTERNAL_STAFF_ROLES
 from agency_tracking.state_machine import transition
 
@@ -67,9 +67,13 @@ def _cv_context(applicant):
 		"passport_expiry": _fmt_date(applicant.passport_expiry_date),
 		"place_of_issue": applicant.passport_issue_place or "ADDIS ABABA",
 		"generated_date": _fmt_date(frappe.utils.nowdate()),
-		"photo_passport": resolve_file_src(applicant.photograph),
-		"photo_full_body": resolve_file_src(applicant.photo_full_body),
-		"passport_scan": resolve_file_src(applicant.passport_scan),
+		# Downsized to roughly print-quality for their actual displayed size (see
+		# embed_image_datauri) -- the source photos are routinely multi-MB phone-camera
+		# originals, and re-decoding/scaling those at full size on every render was the
+		# dominant cost of generating a CV PDF.
+		"photo_passport": embed_image_datauri(applicant.photograph, max_dimension=450),
+		"photo_full_body": embed_image_datauri(applicant.photo_full_body, max_dimension=1000),
+		"passport_scan": embed_image_datauri(applicant.passport_scan, max_dimension=1600),
 	}
 	for field in _CV_SKILL_FIELDS:
 		ctx[field] = "YES" if applicant.get(field) else ""

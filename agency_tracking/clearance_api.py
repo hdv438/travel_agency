@@ -8,7 +8,7 @@ from frappe.utils import formatdate, today
 
 from agency_tracking.clearance_engine import assign_clearance_step as _engine_assign_clearance_step
 from agency_tracking.agency_tracking.doctype.clearance_step.clearance_step import CLEARANCE_ROLE_BY_STEP_TYPE
-from agency_tracking.pdf_utils import asset_datauri, attach_datauri, code128_b_datauri, render_pdf
+from agency_tracking.pdf_utils import asset_datauri, code128_b_datauri, embed_image_datauri, render_pdf
 from agency_tracking.roles import INTERNAL_STAFF_ROLES
 from agency_tracking.state_machine import assert_clearance_step_not_terminal, log_action
 
@@ -449,7 +449,9 @@ def _injaz_context(step, placement, applicant):
 		"right_barcode": code128_b_datauri(application_id),
 		"right_barcode_number": application_id,
 		"sponsor_name": _upper(placement.sponsor_name),
-		"photo_src": attach_datauri(applicant.photograph),
+		# Downsized to roughly print-quality for its ~118x138px displayed size (see
+		# embed_image_datauri) -- source photos are routinely multi-MB phone-camera originals.
+		"photo_src": embed_image_datauri(applicant.photograph, max_dimension=450),
 		"emblem_src": asset_datauri("templates", "injaz_assets", "mofa_emblem.png"),
 		"agency_full": ORIGIN_AGENCY_FULL,
 		"agency_email": ORIGIN_AGENCY_EMAIL,
