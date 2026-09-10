@@ -34,6 +34,13 @@
       width: 100%;
       border-collapse: collapse;
       margin-bottom: 6px;
+      /* Without this, a long visa_number/application_id (code128_b_datauri's rendered width
+         scales linearly with string length, uncapped) can force auto table layout to grow the
+         left/right columns past their 33% share, pushing the whole header wider than the page
+         and clipping content on the right edge -- fixed layout keeps the 33/34/33 split exact
+         regardless of content, so an oversized barcode image shrinks to fit instead (see
+         .barcode's max-width below) rather than blowing out the table. */
+      table-layout: fixed;
     }
 
     .hdr td {
@@ -58,7 +65,15 @@
     }
 
     .barcode {
-      height: 42px;
+      /* width/height both auto + max-* (not a fixed height) so the browser always preserves
+         the image's aspect ratio while capping it -- a fixed height paired with a max-width
+         override would let the two dimensions scale independently and visibly squish the bars.
+         A barcode that already fits at 42px tall renders unchanged; only one wide enough to
+         overflow its column shrinks (proportionally) to fit. */
+      width: auto;
+      height: auto;
+      max-width: 100%;
+      max-height: 42px;
       display: block;
       margin: 0 auto;
     }
