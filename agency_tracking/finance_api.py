@@ -529,3 +529,24 @@ def get_batch_invoice_pdf(batch_name):
 	frappe.local.response.filename = f"{batch_name}-invoice.pdf"
 	frappe.local.response.filecontent = render_batch_invoice_pdf(batch_name)
 	frappe.local.response.type = "pdf"
+
+
+@frappe.whitelist()
+def enqueue_get_batch_invoice_pdf(batch_name):
+	"""Async twin of get_batch_invoice_pdf -- same permission gate, but returns a Background Job
+	reference immediately instead of blocking on the render. Poll
+	background_jobs.get_job_status(job) for the result."""
+	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	if not frappe.db.exists("Commission Batch Request", batch_name):
+		frappe.throw(f"Commission Batch Request {batch_name} not found.", frappe.DoesNotExistError)
+
+	from agency_tracking.background_jobs import enqueue_job
+
+	job = enqueue_job(
+		"Render Batch Invoice PDF",
+		reference_doctype="Commission Batch Request",
+		reference_name=batch_name,
+		batch_name=batch_name,
+	)
+	return {"job": job, "status": "Queued"}

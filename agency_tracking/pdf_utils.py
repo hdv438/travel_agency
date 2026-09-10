@@ -10,6 +10,7 @@ import mimetypes
 import os
 
 import frappe
+from frappe.utils.pdf import get_pdf
 
 # Code128 module patterns (values 0-106). Each string is six digits: alternating bar/space widths
 # in modules, starting with a bar. 103=Start B, 106=Stop (with its trailing bar).
@@ -201,6 +202,12 @@ def embed_image_datauri(url, max_dimension=1000, jpeg_quality=82):
 
 
 def render_pdf(template, context):
-	"""Render a Jinja template path to PDF bytes via Frappe's standard wkhtmltopdf path."""
+	"""Render a Jinja template path to PDF bytes via Frappe's standard wkhtmltopdf path.
+
+	Imports get_pdf directly rather than relying on `frappe.utils.pdf` being reachable as an
+	attribute of the already-imported `frappe.utils` package -- that only holds true if some
+	other code path in the same process happened to import the pdf submodule first (true by
+	accident in most web-request workers, false in a freshly-started RQ background worker,
+	where this raised a bare AttributeError before every PDF render could even begin)."""
 	html = frappe.render_template(template, context)
-	return frappe.utils.pdf.get_pdf(html)
+	return get_pdf(html)

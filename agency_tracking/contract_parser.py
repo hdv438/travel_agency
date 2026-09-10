@@ -703,3 +703,50 @@ def parse_visa_file(file_url):
 	file_path = _resolve_frappe_file_path(file_url)
 	text = extract_text_from_pdf(file_path) if file_path else ""
 	return {k: v for k, v in extract_visa_fields(text).items() if v is not None}
+
+
+@frappe.whitelist()
+def enqueue_parse_contract_file(file_url, destination_country=None):
+	"""Async twin of parse_contract_file -- returns a Background Job reference immediately
+	instead of blocking on the parse. Poll background_jobs.get_job_status(job) for the result.
+	Note: unlike parse_contract_file itself (open to any authenticated user, a pre-existing gap
+	not being widened here), this async entry point is gated to internal staff."""
+	from agency_tracking.roles import INTERNAL_STAFF_ROLES
+
+	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	from agency_tracking.background_jobs import enqueue_job
+
+	file_doc = frappe.db.get_value("File", {"file_url": file_url}, "name")
+	job = enqueue_job(
+		"Parse Contract",
+		reference_doctype="File" if file_doc else None,
+		reference_name=file_doc,
+		file_url=file_url,
+		destination_country=destination_country,
+	)
+	return {"job": job, "status": "Queued"}
+
+
+@frappe.whitelist()
+def enqueue_parse_visa_file(file_url):
+	"""Async twin of parse_visa_file -- returns a Background Job reference immediately instead
+	of blocking on the parse. Poll background_jobs.get_job_status(job) for the result. Note:
+	unlike parse_visa_file itself (open to any authenticated user, a pre-existing gap not being
+	widened here), this async entry point is gated to internal staff."""
+	from agency_tracking.roles import INTERNAL_STAFF_ROLES
+
+	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	from agency_tracking.background_jobs import enqueue_job
+
+	file_doc = frappe.db.get_value("File", {"file_url": file_url}, "name")
+	job = enqueue_job(
+		"Parse Visa",
+		reference_doctype="File" if file_doc else None,
+		reference_name=file_doc,
+		file_url=file_url,
+	)
+	return {"job": job, "status": "Queued"}

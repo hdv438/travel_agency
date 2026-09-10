@@ -832,3 +832,27 @@ def parse_passport_file(file_url: str) -> dict:
 	return parse_passport_mrz(file_path)
 
 
+@frappe.whitelist()
+def enqueue_parse_passport_file(file_url: str):
+	"""Async twin of parse_passport_file -- same permission gate and File-resolution check, but
+	returns a Background Job reference immediately instead of blocking on the OCR. Poll
+	background_jobs.get_job_status(job) for the result."""
+	from agency_tracking.roles import INTERNAL_STAFF_ROLES
+
+	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	file_doc = frappe.db.get_value("File", {"file_url": file_url}, "name")
+	if not file_doc:
+		frappe.throw("A valid uploaded File is required.", frappe.ValidationError)
+
+	from agency_tracking.background_jobs import enqueue_job
+
+	job = enqueue_job(
+		"Parse Passport",
+		reference_doctype="File",
+		reference_name=file_doc,
+		file_url=file_url,
+	)
+	return {"job": job, "status": "Queued"}
+
+

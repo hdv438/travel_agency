@@ -84,7 +84,7 @@
     },
     {
       "name": "Reports",
-      "description": "Management/Admin visibility \u2014 daily/staff/financial/aging/operations reports"
+      "description": "Management/Admin visibility — daily/staff/financial/aging/operations reports"
     },
     {
       "name": "Clearance Steps",
@@ -129,6 +129,10 @@
     {
       "name": "Documents & Storage",
       "description": "Object-storage (S3/Wasabi/local) connectivity check for Storage Settings"
+    },
+    {
+      "name": "Background Jobs",
+      "description": "Generic async job queue for the OCR/PDF endpoints that are slow enough to run in the background instead of blocking the request (see the module-level docstring in agency_tracking/background_jobs.py)."
     }
   ],
   "paths": {
@@ -4757,7 +4761,7 @@
         "tags": [
           "Reports"
         ],
-        "summary": "CVs created, medicals processed, clearances issued, embassies cleared, tickets booked, departures \u2014 for a date range",
+        "summary": "CVs created, medicals processed, clearances issued, embassies cleared, tickets booked, departures — for a date range",
         "description": "business-workflow-srs.md Part 8's exact list.",
         "x-roles": [
           "Manager",
@@ -7386,6 +7390,349 @@
           },
           "403": {
             "description": "Not permitted (role/permission check failed)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.passport_parser.enqueue_parse_passport_file": {
+      "post": {
+        "tags": [
+          "Document Parsing"
+        ],
+        "summary": "Enqueue passport OCR as a background job",
+        "description": "Async twin of parse_passport_file -- same permission gate and File-resolution check, but returns a Background Job reference immediately instead of blocking on the OCR (~5-6s). Poll agency_tracking.background_jobs.get_job_status with the returned job name; result is the same dict parse_passport_file would have returned, in the 'result' field once status is Completed.",
+        "x-roles": [
+          "All internal staff (not foreign agencies)"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "file_url",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.contract_parser.enqueue_parse_contract_file": {
+      "post": {
+        "tags": [
+          "Document Parsing"
+        ],
+        "summary": "Enqueue contract parsing as a background job",
+        "description": "Async twin of parse_contract_file, gated to internal staff (the synchronous original has no permission gate -- a pre-existing gap not widened here). Returns a Background Job reference immediately; poll agency_tracking.background_jobs.get_job_status for the result.",
+        "x-roles": [
+          "All internal staff (not foreign agencies)"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "file_url",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "destination_country",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.contract_parser.enqueue_parse_visa_file": {
+      "post": {
+        "tags": [
+          "Document Parsing"
+        ],
+        "summary": "Enqueue Kuwait visa parsing as a background job",
+        "description": "Async twin of parse_visa_file, gated to internal staff (the synchronous original has no permission gate -- a pre-existing gap not widened here). Returns a Background Job reference immediately; poll agency_tracking.background_jobs.get_job_status for the result.",
+        "x-roles": [
+          "All internal staff (not foreign agencies)"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "file_url",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.clearance_api.enqueue_render_injaz_pdf": {
+      "post": {
+        "tags": [
+          "Clearance Steps"
+        ],
+        "summary": "Enqueue the Injaz PDF render as a background job",
+        "description": "Async twin of render_injaz_pdf -- same param resolution and permission gate, but returns a Background Job reference immediately instead of blocking on the render (~3s). Poll agency_tracking.background_jobs.get_job_status; once Completed, download the PDF via the job's result_file URL.",
+        "x-roles": [
+          "All internal staff (not foreign agencies)"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "clearance_step_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.cv_api.enqueue_render_cv_pdf": {
+      "post": {
+        "tags": [
+          "CV Generation"
+        ],
+        "summary": "Enqueue the CV PDF render as a background job",
+        "description": "Async twin of render_cv_pdf -- same param resolution and permission gate, but returns a Background Job reference immediately instead of blocking on the render (~2s). Poll agency_tracking.background_jobs.get_job_status; once Completed, download the PDF via the job's result_file URL.",
+        "x-roles": [
+          "All internal staff (not foreign agencies)"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "applicant_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.finance_api.enqueue_get_batch_invoice_pdf": {
+      "post": {
+        "tags": [
+          "Finance"
+        ],
+        "summary": "Enqueue the commission batch invoice PDF render as a background job",
+        "description": "Async twin of get_batch_invoice_pdf -- same permission gate, but returns a Background Job reference immediately instead of blocking on the render + cross-batch arrears calculation (~4s). Poll agency_tracking.background_jobs.get_job_status; once Completed, download the PDF via the job's result_file URL.",
+        "x-roles": [
+          "Finance Manager",
+          "Admin"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "batch_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.background_jobs.get_job_status": {
+      "post": {
+        "tags": [
+          "Background Jobs"
+        ],
+        "summary": "Poll a background job's status/result",
+        "description": "Shared status-check endpoint for all six enqueue_* background jobs (OCR/PDF rendering). Returns status (Queued/Running/Completed/Failed), the parsed result dict for parser jobs once Completed, or a result_file download URL for PDF-render jobs. The requester sees their own jobs; Manager/Admin/System Manager can see any job.",
+        "x-roles": [
+          "Requester of the job, or Manager/Admin/System Manager"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "job_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
           }
         },
         "security": [

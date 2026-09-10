@@ -515,6 +515,22 @@ def _injaz_context(step, placement, applicant):
 	}
 
 
+def _build_injaz_pdf(clearance_step_name):
+	"""Load the step + its Placement/Applicant, validate the Saudi-only corridor, render, and
+	log the Access event. Returns (pdf_bytes, filename). Shared by render_injaz_pdf (streams the
+	result straight to the caller) and the background-job handler (attaches it as a File)."""
+	step = frappe.get_doc("Clearance Step", clearance_step_name)
+
+	placement = frappe.get_doc("Placement", step.placement)
+	if placement.destination_country != "Saudi Arabia":
+		frappe.throw("Injaz applies only to Saudi Arabia placements.", frappe.ValidationError)
+	applicant = frappe.get_doc("Applicant", placement.applicant)
+
+	pdf_bytes = render_pdf(INJAZ_TEMPLATE, _injaz_context(step, placement, applicant))
+	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Injaz PDF downloaded for {applicant.full_name}", event_type="Access")
+	return pdf_bytes, f"Injaz_{placement.applicant}.pdf"
+
+
 @frappe.whitelist()
 def render_injaz_pdf(clearance_step_name=None, **kwargs):
 	"""Generate the Embassy of Saudi Arabia Injaz application PDF for a Saudi clearance step.
@@ -528,15 +544,32 @@ def render_injaz_pdf(clearance_step_name=None, **kwargs):
 
 	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
-	step = frappe.get_doc("Clearance Step", clearance_step_name)
 
-	placement = frappe.get_doc("Placement", step.placement)
-	if placement.destination_country != "Saudi Arabia":
-		frappe.throw("Injaz applies only to Saudi Arabia placements.", frappe.ValidationError)
-	applicant = frappe.get_doc("Applicant", placement.applicant)
-
-	pdf_bytes = render_pdf(INJAZ_TEMPLATE, _injaz_context(step, placement, applicant))
-	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Injaz PDF downloaded for {applicant.full_name}", event_type="Access")
-	frappe.response["filename"] = f"Injaz_{placement.applicant}.pdf"
+	pdf_bytes, filename = _build_injaz_pdf(clearance_step_name)
+	frappe.response["filename"] = filename
 	frappe.response["filecontent"] = pdf_bytes
 	frappe.response["type"] = "download"
+
+
+@frappe.whitelist()
+def enqueue_render_injaz_pdf(clearance_step_name=None, **kwargs):
+	"""Async twin of render_injaz_pdf -- same param resolution and permission gate, but returns
+	a Background Job reference immediately instead of blocking on the render. Poll
+	background_jobs.get_job_status(job) for the result."""
+	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("step_name")
+	if not clearance_step_name:
+		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
+	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	if not frappe.db.exists("Clearance Step", clearance_step_name):
+		frappe.throw(f"Clearance Step {clearance_step_name} not found.", frappe.DoesNotExistError)
+
+	from agency_tracking.background_jobs import enqueue_job
+
+	job = enqueue_job(
+		"Render Injaz PDF",
+		reference_doctype="Clearance Step",
+		reference_name=clearance_step_name,
+		clearance_step_name=clearance_step_name,
+	)
+	return {"job": job, "status": "Queued"}

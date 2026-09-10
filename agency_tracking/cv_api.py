@@ -162,3 +162,27 @@ def render_cv_pdf(applicant_name=None, **kwargs):
 	frappe.response["filename"] = f"CV_{applicant_name}.pdf"
 	frappe.response["filecontent"] = pdf_bytes
 	frappe.response["type"] = "download"
+
+
+@frappe.whitelist()
+def enqueue_render_cv_pdf(applicant_name=None, **kwargs):
+	"""Async twin of render_cv_pdf -- same param resolution and permission gate, but returns a
+	Background Job reference immediately instead of blocking on the render. Poll
+	background_jobs.get_job_status(job) for the result."""
+	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	applicant_name = applicant_name or kwargs.get("name") or kwargs.get("applicant")
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
+	if not frappe.db.exists("Applicant", applicant_name):
+		frappe.throw(f"Applicant {applicant_name} not found.", frappe.DoesNotExistError)
+
+	from agency_tracking.background_jobs import enqueue_job
+
+	job = enqueue_job(
+		"Render CV PDF",
+		reference_doctype="Applicant",
+		reference_name=applicant_name,
+		applicant_name=applicant_name,
+	)
+	return {"job": job, "status": "Queued"}
