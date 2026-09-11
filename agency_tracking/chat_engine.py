@@ -135,13 +135,16 @@ def deliver_message(message, thread):
 
 
 @frappe.whitelist()
-def get_placement_officers(placement_name):
+def get_placement_officers(placement_name=None, **kwargs):
 	"""Transcribed from the addendum verbatim — "every Placement detail view exposes who's
 	currently assigned each clearance step, sourced from the same ToDo data already driving
 	Clearance Step permissions." The addendum's own snippet doesn't gate this, but a Placement
 	detail view already implies the caller can see that placement — added explicitly since
 	placement_name is a guessable, sequential-looking ID (PLM-00001, ...), not a secret.
 	"""
+	placement_name = placement_name or kwargs.get("placement") or kwargs.get("name")
+	if not placement_name:
+		frappe.throw("placement_name is required.", frappe.ValidationError)
 	if not frappe.has_permission("Placement", "read", doc=placement_name):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	steps = frappe.get_all("Clearance Step", filters={"placement": placement_name}, fields=["step_type", "name"])
