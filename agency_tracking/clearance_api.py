@@ -200,10 +200,15 @@ def submit_embassy_step(clearance_step_name=None, override_reason=None, **kwargs
 
 
 @frappe.whitelist()
-def record_wakala_payment(clearance_step_name=None, wakala_status=None, wakala_amount=None, paid_date=None, **kwargs):
+def record_wakala_payment(clearance_step_name=None, wakala_status=None, wakala_amount=None, paid_date=None, reference_no=None, **kwargs):
 	"""Record the Saudi Embassy step's Wakala fee payment (paid by the foreign agency, not
 	internal staff -- this just records that it landed). Embassy-step-only: Kuwait's own
 	"Kuwait Embassy" step_type doesn't carry a Wakala fee (see wakala_amount's depends_on).
+
+	reference_no here is the Musaned authorization number, stored in its own
+	wakala_reference_no field -- NOT the step's shared reference_no (2026-09-11 fix: an earlier
+	version of this endpoint wrote it into reference_no, silently overwriting the same step's
+	Embassy visa/stamp reference set by stamp_embassy_step -- a real, different number).
 
 	Replaces the previous only-way-to-change-it: a raw desk-form field edit, which had no role
 	gate beyond blanket Clearance Step write access (shared by every clearance-country role, not
@@ -219,6 +224,8 @@ def record_wakala_payment(clearance_step_name=None, wakala_status=None, wakala_a
 	if wakala_status:
 		step.wakala_status = wakala_status
 		step.wakala_paid_date = (paid_date or today()) if wakala_status == "Paid" else None
+	if reference_no is not None:
+		step.wakala_reference_no = reference_no
 	step.save(ignore_permissions=True)
 	log_action(
 		"Clearance Step",
@@ -244,10 +251,12 @@ def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 	step = _load_actionable_step(clearance_step_name, {"Embassy", "Kuwait Embassy", "Saudi Embassy"})
 	if not _can_act_on_step(step):
 		frappe.throw("Not permitted.", frappe.PermissionError)
-	if step.status == "Stamped":
-		return step.as_dict()
-	# S-2: documents can only be Stamped after they were Submitted (the Mon->Thu cycle).
-	if step.status != "Submitted":
+	is_correction = step.status == "Stamped"
+	# S-2: documents can only be Stamped after they were Submitted (the Mon->Thu cycle) --
+	# except a correction re-save of an already-Stamped step (2026-09-11: data entered here,
+	# e.g. the visa/stamp reference, must stay fixable after the fact -- previously this early-
+	# returned silently without ever applying a corrected reference_no).
+	if not is_correction and step.status != "Submitted":
 		frappe.throw(f"Documents must be Submitted before they can be Stamped (this step is '{step.status}').", frappe.ValidationError)
 	# Saudi corridor only: Taeshir runs in parallel with Embassy, but Embassy may not be
 	# Stamped (the terminal, success outcome) until Taeshir is done -- Submitted stays
@@ -255,7 +264,8 @@ def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 	# Taeshir has exactly one terminal status ("Complete" -- it's not in
 	# TERMINAL_STATUS_BY_STEP_TYPE so complete_clearance_step() always falls through to
 	# DEFAULT_TERMINAL_STATUS; nothing ever sets a Taeshir step to Issued/Stamped/Rejected).
-	if step.step_type == "Embassy":
+	# Only checked on the real Submitted->Stamped transition, not on a data-only correction.
+	if not is_correction and step.step_type == "Embassy":
 		taeshir_status = _taeshir_status_for_placement(step.placement)
 		if taeshir_status != "Complete":
 			frappe.throw(
@@ -285,8 +295,10 @@ def reject_embassy_step(clearance_step_name, rejection_remark):
 	if not _can_act_on_step(step):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	assert_clearance_step_not_terminal(step)
-	# S-2: a Rejected outcome only makes sense for documents that were actually Submitted.
-	if step.status != "Submitted":
+	# S-2: a Rejected outcome only makes sense for documents that were actually Submitted --
+	# except correcting the remark on an already-Rejected step (2026-09-11: same
+	# forgiving-on-data, firm-on-status-direction policy as stamp_embassy_step).
+	if step.status not in ("Submitted", "Rejected"):
 		frappe.throw(f"Documents must be Submitted before they can be Rejected (this step is '{step.status}').", frappe.ValidationError)
 	step.status = "Rejected"
 	step.rejection_remark = rejection_remark
@@ -332,6 +344,7 @@ def list_my_clearance_steps(placement=None):
 			"payment_status",
 			"wakala_amount",
 			"wakala_status",
+			"wakala_reference_no",
 			"rejection_remark",
 		],
 		order_by="sequence_order asc",

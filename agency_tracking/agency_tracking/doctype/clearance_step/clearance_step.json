@@ -28,6 +28,7 @@
   "wakala_amount",
   "wakala_status",
   "wakala_paid_date",
+  "wakala_reference_no",
   "police_ashara_sec",
   "police_ashara_appointment_date",
   "police_ashara_status",
@@ -184,6 +185,12 @@
    "fieldname": "wakala_paid_date",
    "fieldtype": "Date",
    "label": "Wakala Paid Date"
+  },
+  {
+   "description": "Musaned electronic power-of-attorney authorization number -- a distinct real-world number from this step's own Visa/Stamp reference_no (2026-09-11: previously the frontend and record_wakala_payment both wrote this into reference_no, silently overwriting the visa/stamp reference).",
+   "fieldname": "wakala_reference_no",
+   "fieldtype": "Data",
+   "label": "Wakala Authorization / Reference No"
   },
   {
    "collapsible": 1,

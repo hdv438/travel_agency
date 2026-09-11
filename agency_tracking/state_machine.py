@@ -92,7 +92,6 @@ def strip_lifecycle_fields(data):
 # every such action now checks before writing, rather than patching each endpoint in isolation.
 
 TERMINAL_PLACEMENT_STATUSES = {"Departed", "Cancelled"}
-TERMINAL_CLEARANCE_STEP_STATUSES = {"Issued", "Complete", "Stamped", "Rejected"}
 
 
 def assert_placement_not_terminal(placement):
@@ -111,16 +110,16 @@ def assert_placement_not_terminal(placement):
 
 def assert_clearance_step_not_terminal(step):
 	"""Guards every Clearance-Step-mutating action (start/complete_clearance_step,
-	submit/stamp/reject_embassy_step, reassign_clearance_step). Once a step itself reaches a
-	terminal outcome, or its parent Placement is already Departed/Cancelled, it's a historical
-	record -- flipping a Stamped step to Rejected (or vice versa) after the fact produces
-	self-contradictory data (a Departed placement whose corridor step says it never cleared)."""
-	if step.status in TERMINAL_CLEARANCE_STEP_STATUSES:
-		frappe.throw(
-			f"{step.name} is already {step.status} (terminal) -- this can no longer be edited "
-			"through this action.",
-			frappe.ValidationError,
-		)
+	submit/stamp/reject_embassy_step, reassign_clearance_step) against editing a step whose
+	parent Placement is already Departed/Cancelled -- that history is final.
+
+	2026-09-11 (product decision): a step reaching its OWN terminal outcome (Issued/Complete/
+	Stamped/Rejected) no longer blocks further edits through these same actions -- LMIS, Taeshir/
+	Injaz, Embassy, and reassignment all need to stay correctable (fix a wrong reference number,
+	amount, or officer) after the fact, without that correction reopening or reversing anything
+	already downstream of it (auto-advance, etc. are idempotent and unaffected by a data-only
+	correction). Each caller still guards its OWN nonsensical transitions where relevant (e.g.
+	reject_embassy_step still refuses a step that was never Submitted)."""
 	placement_status = frappe.db.get_value("Placement", step.placement, "status")
 	if placement_status in TERMINAL_PLACEMENT_STATUSES:
 		frappe.throw(
