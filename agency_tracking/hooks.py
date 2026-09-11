@@ -132,11 +132,17 @@ permission_query_conditions = {
 	"Background Job": "agency_tracking.agency_tracking.doctype.background_job.background_job.get_permission_query_conditions",
 }
 
-# Single-document read gate for Background Job -- load-bearing for its result PDF's own
+# Single-document read/write gate. Background Job: load-bearing for its result PDF's own
 # permission check (a private File's download falls through to has_permission("read") on its
-# attached_to_doctype/_name), not just an audit-log-style role grant like the doctypes above.
+# attached_to_doctype/_name), not just an audit-log-style role grant. Clearance Step (2026-09-11):
+# get_permission_query_conditions above only filters list/report queries, not a single
+# frappe.get_doc()/doc.save()/REST /api/resource/<name> call -- without this, any clearance-
+# country role's blanket DocType-level write (every one of them has "write": 1 in
+# clearance_step.json) reaches every row by name regardless of step_type, even one that role can
+# never see in any list.
 has_permission = {
 	"Background Job": "agency_tracking.agency_tracking.doctype.background_job.background_job.has_permission",
+	"Clearance Step": "agency_tracking.agency_tracking.doctype.clearance_step.clearance_step.has_permission",
 }
 
 # DocType Class

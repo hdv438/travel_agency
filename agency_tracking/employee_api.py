@@ -27,6 +27,58 @@ def _check_staff_admin_perm():
 		frappe.throw("Not permitted. Only system administrators and managers can manage staff.", frappe.PermissionError)
 
 
+# The app-level admin roles that matter for the lockout guards below -- deliberately excludes the
+# literal "Administrator" super-user account (handled separately, has no Has Role row to count).
+_APP_ADMIN_ROLES = {"Admin", "Manager", "System Manager"}
+
+
+def _other_enabled_staff_admins_exist(exclude_email):
+	"""Is there at least one OTHER enabled account (besides exclude_email, and besides the
+	built-in Administrator, which can't be disabled/deleted through this API anyway) still
+	holding an app-admin role? Used to stop the second-to-last admin from disabling/demoting the
+	last one and bricking staff-admin access for everybody, not just themselves."""
+	holders = frappe.get_all(
+		"Has Role",
+		filters={"role": ["in", list(_APP_ADMIN_ROLES)], "parent": ["not in", [exclude_email, "Administrator"]]},
+		pluck="parent",
+	)
+	if not holders:
+		return False
+	return frappe.db.count("User", {"name": ["in", list(set(holders))], "enabled": 1}) > 0
+
+
+def _guard_against_admin_lockout(email, new_role_list=None, disabling=False):
+	"""Refuse a role change / disable that would strip email's own staff-admin capability, when
+	that would either lock the caller out of their own session (self-lockout) or leave the whole
+	system with no staff-admin account left able to fix it back through the app (total lockout).
+	Found live 2026-09-11: update_employee_roles previously let a caller wipe their own (or the
+	last remaining) Admin/Manager/System Manager role with zero warning -- `user.roles = []` then
+	re-appended from whatever role_list was submitted, no protection at all. A profile-edit flow
+	that submitted an incomplete/empty roles list silently locked the account out: still logged
+	in, but every permission-gated endpoint correctly 403s from then on since the roles are
+	genuinely gone from the database, not a session/cache issue."""
+	if email == "Administrator":
+		return  # the built-in super-user; always has full access regardless of Has Role rows
+	still_admin_capable = disabling is False and bool((new_role_list or set()) & _APP_ADMIN_ROLES)
+	if still_admin_capable:
+		return
+	was_admin_capable = bool(set(frappe.get_roles(email)) & _APP_ADMIN_ROLES)
+	if not was_admin_capable:
+		return  # nothing admin-capable being lost
+	if email == frappe.session.user:
+		frappe.throw(
+			"Refusing to remove your own Admin/Manager/System Manager access -- this would lock "
+			"you out of your own session. Have another admin make this change instead.",
+			frappe.ValidationError,
+		)
+	if not _other_enabled_staff_admins_exist(email):
+		frappe.throw(
+			f"Refusing: {email} is the last remaining staff-admin account. This would leave the "
+			"system with nobody able to manage staff through the app.",
+			frappe.ValidationError,
+		)
+
+
 @frappe.whitelist()
 def list_employees():
 	"""Returns all system users with their assigned security roles aggregated in a single query."""
@@ -159,6 +211,7 @@ def update_employee_roles(email=None, roles=None, **kwargs):
 
 	role_list = set(roles or [])
 	_validate_no_conflicting_roles(role_list)
+	_guard_against_admin_lockout(email, new_role_list=role_list)
 	role_list.add("Desk User")
 
 	user = frappe.get_doc("User", email)
@@ -194,6 +247,8 @@ def toggle_employee_status(email=None, enabled=None, **kwargs):
 		frappe.throw("Email is required.", frappe.ValidationError)
 
 	val = 1 if enabled in (1, "1", True, "true", "True") else 0
+	if not val:
+		_guard_against_admin_lockout(email, disabling=True)
 	frappe.db.set_value("User", email, "enabled", val)
 	return {"status": "success", "enabled": val}
 

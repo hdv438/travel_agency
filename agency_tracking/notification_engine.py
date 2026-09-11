@@ -20,6 +20,10 @@
 import frappe
 from frappe.utils import now_datetime
 
+# How long a push service should hold an undelivered notification for an offline recipient
+# before giving up, per RFC 8030. pywebpush defaults to 0 ("now or never") if not overridden.
+PUSH_TTL_SECONDS = 24 * 60 * 60
+
 
 def notify(user, template, context, channel="Push"):
 	log = frappe.get_doc(
@@ -139,6 +143,11 @@ def _deliver_push(log):
 				data=payload,
 				vapid_private_key=vapid,
 				vapid_claims=dict(vapid_claims),
+				# pywebpush defaults ttl=0 ("deliver now or drop it" per the Web Push spec) --
+				# an offline recipient would never get this even after reconnecting, since the
+				# push service doesn't queue it. A day is long enough to survive a normal
+				# offline stretch without holding genuinely stale notifications forever.
+				ttl=PUSH_TTL_SECONDS,
 			)
 		except Exception as e:
 			errors.append(str(e))

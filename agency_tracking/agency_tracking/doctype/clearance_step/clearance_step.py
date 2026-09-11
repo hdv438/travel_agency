@@ -82,6 +82,41 @@ class ClearanceStep(Document):
 			migrate_attach_to_r2(payment, "receipt_url", "finance-receipts", applicant_name=applicant_name)
 
 
+def has_permission(doc, ptype=None, user=None):
+	"""Single-document permission gate (2026-09-11). get_permission_query_conditions below only
+	filters list/report queries -- Frappe does NOT consult it for a single frappe.get_doc(),
+	doc.save(), or the generic REST /api/resource/Clearance Step/<name> read or write. Without
+	this, a role with blanket DocType-level write (every clearance-country role has one) could
+	act on ANY Clearance Step row by name regardless of step_type, even though it never appears
+	in any list/report for them -- confirmed live: a Saudi-Taeshir-only user could
+	frappe.client.set_value() an Embassy step's Wakala fields despite that row being completely
+	invisible to them in every list view. Mirrors get_permission_query_conditions' own row
+	scoping so the two can't disagree: management always; the officer with an open ToDo on this
+	exact row (Clearance Officer/Ticketer's per-row model); or whoever holds the role mapped to
+	this row's own step_type (the six country+step roles' per-step_type model)."""
+	user = user or frappe.session.user
+	roles = set(frappe.get_roles(user))
+	if _MGMT_ROLES & roles:
+		return True
+	if not doc or not doc.get("name"):
+		# No existing row to scope by (e.g. a create check on an unsaved doc) -- defer to the
+		# blanket DocType-level role permissions already in clearance_step.json.
+		return True
+	if {"Clearance Officer", "Ticketer"} & roles:
+		if frappe.db.exists(
+			"ToDo",
+			{
+				"reference_type": "Clearance Step",
+				"reference_name": doc.name,
+				"allocated_to": user,
+				"status": "Open",
+			},
+		):
+			return True
+	required_role = CLEARANCE_ROLE_BY_STEP_TYPE.get(doc.get("step_type"))
+	return bool(required_role and required_role in roles)
+
+
 def get_permission_query_conditions(user):
 	"""Part G, extended 2026-08-29: Clearance Officer / Ticketer still see rows only via ToDo
 	assignment (per-row, cross-step-type). The six country+step roles instead see *every* row
