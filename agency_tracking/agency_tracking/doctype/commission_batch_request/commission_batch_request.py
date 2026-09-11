@@ -93,7 +93,18 @@ class CommissionBatchRequest(Document):
 		accounted_birr = paid_birr + write_off_birr
 		self.balance_due_birr = max(flt(self.total_amount_birr) - accounted_birr, 0)
 
-		if total_original > 0 and accounted_original >= total_original:
+		# 2026-09-11 fix (product decision): guard on "has this batch ever left Draft" rather than
+		# "total_original > 0" -- a batch whose every remaining item got Released (carried into a
+		# later batch via release_unpaid_items) has total_original = 0 too, which the old
+		# `total_original > 0` guard treated identically to a fresh, empty Draft batch: neither
+		# branch below ever fired, so status froze at "Partially Settled" forever (reproduced
+		# live as CBR-00007: balance_due_original = 0.0, stuck, nothing left to actually collect).
+		# accounted_original is always >= 0, so when total_original is 0 this condition is always
+		# true -- correct, since "nothing left owed on THIS batch" is exactly what Settled should
+		# mean here, whether that's because it was paid off, written off, or fully released
+		# elsewhere. A fresh Draft batch (status still "Draft") is still excluded, so it can't
+		# trivially read as Settled before it's ever been sent.
+		if self.status != "Draft" and accounted_original >= total_original:
 			self.status = "Settled"
 			if not self.settled_on:
 				self.settled_on = today()
