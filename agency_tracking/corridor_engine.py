@@ -11,8 +11,10 @@ import frappe
 
 
 @frappe.whitelist()
-def get_corridor_steps(destination_country):
+def get_corridor_steps(destination_country=None, **kwargs):
 	"""Ordered step definitions for a destination country's corridor."""
+	if not destination_country:
+		frappe.throw("destination_country is required.", frappe.ValidationError)
 	corridor_name = frappe.db.get_value(
 		"Corridor Definition", {"destination_country": destination_country}, "name"
 	)

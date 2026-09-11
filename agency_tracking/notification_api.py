@@ -14,8 +14,10 @@ from agency_tracking.watchdogs import send_wakala_reminder
 
 
 @frappe.whitelist()
-def subscribe_to_push(endpoint, p256dh, auth):
+def subscribe_to_push(endpoint=None, p256dh=None, auth=None, **kwargs):
 	"""A user subscribing their own browser — never on behalf of anyone else."""
+	if not (endpoint and p256dh and auth):
+		frappe.throw("endpoint, p256dh, and auth are all required.", frappe.ValidationError)
 	_register_push_subscription(frappe.session.user, endpoint, p256dh, auth)
 	return {"status": "subscribed"}
 

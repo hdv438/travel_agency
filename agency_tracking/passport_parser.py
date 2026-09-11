@@ -817,7 +817,7 @@ def parse_passport_mrz(file_path: str) -> dict:
 
 
 @frappe.whitelist()
-def parse_passport_file(file_url: str) -> dict:
+def parse_passport_file(file_url: str = None, **kwargs) -> dict:
 	"""Whitelisted endpoint to parse an uploaded passport scan. Internal staff only (audit G-004:
 	was ungated) and it resolves ONLY a real uploaded File record -- it never treats the argument
 	as a raw filesystem path, closing the arbitrary-local-file-read hole."""
@@ -833,7 +833,7 @@ def parse_passport_file(file_url: str) -> dict:
 
 
 @frappe.whitelist()
-def enqueue_parse_passport_file(file_url: str):
+def enqueue_parse_passport_file(file_url: str = None, **kwargs):
 	"""Async twin of parse_passport_file -- same permission gate and File-resolution check, but
 	returns a Background Job reference immediately instead of blocking on the OCR. Poll
 	background_jobs.get_job_status(job) for the result."""

@@ -284,9 +284,11 @@ def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 
 
 @frappe.whitelist()
-def reject_embassy_step(clearance_step_name, rejection_remark):
+def reject_embassy_step(clearance_step_name=None, rejection_remark=None, **kwargs):
 	"""Documents returned rejected (Thursday) -- requires a written remark
 	(Clearance Step.validate() also enforces this as a backstop)."""
+	if not clearance_step_name:
+		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
 	if not rejection_remark:
 		frappe.throw("A rejection remark is required.", frappe.ValidationError)
 	step = frappe.get_doc("Clearance Step", clearance_step_name)
@@ -310,9 +312,13 @@ def reject_embassy_step(clearance_step_name, rejection_remark):
 
 
 @frappe.whitelist()
-def reassign_clearance_step(clearance_step_name, new_officer):
+def reassign_clearance_step(clearance_step_name=None, new_officer=None, **kwargs):
 	"""Part A.2: "reassignable by a manager if needed" — the escape hatch for the default
 	auto-chain."""
+	if not clearance_step_name:
+		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
+	if not new_officer:
+		frappe.throw("new_officer is required.", frappe.ValidationError)
 	if not ({"Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	assert_clearance_step_not_terminal(frappe.get_doc("Clearance Step", clearance_step_name))

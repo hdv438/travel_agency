@@ -81,10 +81,12 @@ def _notify_management_of_ban_event(applicant_name, country, ban_name, event, re
 
 
 @frappe.whitelist()
-def update_applicant(applicant_name, override_ban=False, override_reason=None, **data):
+def update_applicant(applicant_name=None, override_ban=False, override_reason=None, **data):
 	"""Edit an Applicant still at Draft or Registered. Does not change status — use
 	register_applicant for that transition.
 	"""
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
 	doc = frappe.get_doc("Applicant", applicant_name)
 	if not doc.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
@@ -107,7 +109,7 @@ def update_applicant(applicant_name, override_ban=False, override_reason=None, *
 
 
 @frappe.whitelist()
-def log_applicant_fee(applicant_name):
+def log_applicant_fee(applicant_name=None):
 	"""Manual 'Log Fee' button path. Just flips fee_status to Paid and saves -- the actual
 	ledger-entry creation lives in Applicant.maybe_log_fee_transaction (before_save), so a
 	direct Desk edit that sets fee_status=Paid gets identical behavior without going through
@@ -116,6 +118,8 @@ def log_applicant_fee(applicant_name):
 	already-logged error, matching the other single-purpose action endpoints in this module."""
 	from agency_tracking.roles import INTERNAL_STAFF_ROLES
 
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
 	if not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 
@@ -142,12 +146,14 @@ LMIS_EDITABLE_FIELDS = (
 
 
 @frappe.whitelist()
-def update_applicant_for_lmis(applicant_name, **data):
+def update_applicant_for_lmis(applicant_name=None, **data):
 	"""Narrow LMIS-stage edit surface (2026-08-29 correction, Part 5): national_id, labor_id,
 	and emergency_contact_* are deliberately NOT part of the Registered field floor -- they're
 	captured here, once the candidate is actually at the LMIS clearance step, not guessed at
 	registration time. Restricted to the two LMIS roles (plus Manager/Admin, same fallback
 	pattern as everywhere else) rather than general update_applicant."""
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
 	if not ({"Saudi LMIS", "Kuwait LMIS", "Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 
@@ -159,7 +165,7 @@ def update_applicant_for_lmis(applicant_name, **data):
 
 
 @frappe.whitelist()
-def cancel_applicant(applicant_name, reason):
+def cancel_applicant(applicant_name=None, reason=None, **kwargs):
 	"""Global 'Cancelled' escape hatch (2026-08-29 lifecycle spec): only from Registered/CV
 	Generated (never Draft -- nothing committed yet to cancel). If there's an active Placement,
 	freeze it and its Clearance Steps first (marked Cancelled, left as permanent history) and
@@ -167,6 +173,8 @@ def cancel_applicant(applicant_name, reason):
 	Placement.validate()'s own checks (still-matching active_placement/status) pass cleanly.
 	Landing on Cancelled never bumps cycle_number by itself; only a later restart does.
 	"""
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
 	doc = frappe.get_doc("Applicant", applicant_name)
 	if not doc.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
@@ -191,13 +199,15 @@ def cancel_applicant(applicant_name, reason):
 
 
 @frappe.whitelist()
-def restart_applicant(applicant_name, target_status):
+def restart_applicant(applicant_name=None, target_status=None, **kwargs):
 	"""Cancelled -> Draft or Registered. cycle_number bumps automatically (lands on
 	Draft/Registered coming from Cancelled -- state_machine.bump_cycle_number). Restarting
 	straight to Registered fails naturally via the normal ValidationError from
 	Applicant.validate() if the field floor isn't actually satisfied by existing data --
 	retry with target_status="Draft" instead, no special-casing needed here.
 	"""
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
 	if target_status not in ("Draft", "Registered"):
 		frappe.throw("target_status must be 'Draft' or 'Registered'.", frappe.ValidationError)
 	doc = frappe.get_doc("Applicant", applicant_name)
@@ -232,7 +242,9 @@ def register_applicant(applicant_name=None, **kwargs):
 
 
 @frappe.whitelist()
-def get_applicant(applicant_name):
+def get_applicant(applicant_name=None, **kwargs):
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
 	doc = frappe.get_doc("Applicant", applicant_name)
 	if not doc.has_permission("read"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
@@ -260,13 +272,17 @@ def list_applicants(filters=None, limit_page_length=100, order_by="modified desc
 
 
 @frappe.whitelist()
-def set_country_ban(applicant_name, country, reason):
+def set_country_ban(applicant_name=None, country=None, reason=None, **kwargs):
 	"""Whitelisted create surface for Applicant Country Ban (backend-issues #08) -- the doctype
 	previously had no whitelisted writer anywhere, so the only way to set a ban was the raw
 	/api/resource/Applicant Country Ban endpoint, contradicting the "no raw /api/resource/*
 	exposure" architecture rule. Doctype permissions already grant create to Registrar/
 	Complaint Manager/Manager/Admin/System Manager, so this just wraps a normal insert() and
 	lets Frappe's own permission check do the gating."""
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
+	if not country:
+		frappe.throw("country is required.", frappe.ValidationError)
 	if not reason:
 		frappe.throw("A written reason is required to set a country ban.", frappe.ValidationError)
 	if frappe.db.exists("Applicant Country Ban", {"applicant": applicant_name, "country": country}):

@@ -674,11 +674,13 @@ def parse_structured_contract_text(full_text_or_blocks):
 
 
 @frappe.whitelist()
-def parse_contract_file(file_url, destination_country=None):
+def parse_contract_file(file_url=None, destination_country=None, **kwargs):
 	"""
 	Given a Frappe file_url for an uploaded contract, returns a dict of Placement field updates.
 	Extracts contract_signed_date, and country-specific structured fields.
 	"""
+	if not file_url:
+		frappe.throw("file_url is required.", frappe.ValidationError)
 	file_path = _resolve_frappe_file_path(file_url)
 	text = extract_text_from_pdf(file_path) if file_path else ""
 	if not text and file_url and str(file_url).startswith("http"):
@@ -698,21 +700,25 @@ def parse_contract_file(file_url, destination_country=None):
 
 
 @frappe.whitelist()
-def parse_visa_file(file_url):
+def parse_visa_file(file_url=None, **kwargs):
 	"""Kuwait visa document parser for placement_api.upload_visa."""
+	if not file_url:
+		frappe.throw("file_url is required.", frappe.ValidationError)
 	file_path = _resolve_frappe_file_path(file_url)
 	text = extract_text_from_pdf(file_path) if file_path else ""
 	return {k: v for k, v in extract_visa_fields(text).items() if v is not None}
 
 
 @frappe.whitelist()
-def enqueue_parse_contract_file(file_url, destination_country=None):
+def enqueue_parse_contract_file(file_url=None, destination_country=None, **kwargs):
 	"""Async twin of parse_contract_file -- returns a Background Job reference immediately
 	instead of blocking on the parse. Poll background_jobs.get_job_status(job) for the result.
 	Note: unlike parse_contract_file itself (open to any authenticated user, a pre-existing gap
 	not being widened here), this async entry point is gated to internal staff."""
 	from agency_tracking.roles import INTERNAL_STAFF_ROLES
 
+	if not file_url:
+		frappe.throw("file_url is required.", frappe.ValidationError)
 	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 
@@ -730,13 +736,15 @@ def enqueue_parse_contract_file(file_url, destination_country=None):
 
 
 @frappe.whitelist()
-def enqueue_parse_visa_file(file_url):
+def enqueue_parse_visa_file(file_url=None, **kwargs):
 	"""Async twin of parse_visa_file -- returns a Background Job reference immediately instead
 	of blocking on the parse. Poll background_jobs.get_job_status(job) for the result. Note:
 	unlike parse_visa_file itself (open to any authenticated user, a pre-existing gap not being
 	widened here), this async entry point is gated to internal staff."""
 	from agency_tracking.roles import INTERNAL_STAFF_ROLES
 
+	if not file_url:
+		frappe.throw("file_url is required.", frappe.ValidationError)
 	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 

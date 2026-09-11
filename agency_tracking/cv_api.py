@@ -110,7 +110,7 @@ def _attach_cv_pdf(cv, applicant, pdf_bytes):
 
 
 @frappe.whitelist()
-def generate_cv(applicant_name):
+def generate_cv(applicant_name=None, **kwargs):
 	"""Part A.2 Stage 3 / Part I Step 2: create + submit a CV Record for a Standard-track
 	Applicant, then move the Applicant to CV Generated. CV Record.validate() enforces the
 	Standard-only/Registered-status rules first (clearer, CV-specific error messages);
@@ -119,6 +119,8 @@ def generate_cv(applicant_name):
 	this system entirely. Also renders and attaches the actual CV PDF (2026-08-29) --
 	previously this just created a bare record with no document output at all.
 	"""
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
 	applicant = frappe.get_doc("Applicant", applicant_name)
 	if not applicant.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)

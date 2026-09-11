@@ -176,9 +176,11 @@ def run_background_job(bg_job):
 
 
 @frappe.whitelist()
-def get_job_status(job_name):
+def get_job_status(job_name=None, **kwargs):
 	"""Poll a Background Job of any job_type. The requester sees their own; Manager/Admin/
 	System Manager see all (BackgroundJob.has_permission)."""
+	if not job_name:
+		frappe.throw("job_name is required.", frappe.ValidationError)
 	if not frappe.db.exists("Background Job", job_name):
 		frappe.throw(f"Background Job {job_name} not found.", frappe.DoesNotExistError)
 	job = frappe.get_doc("Background Job", job_name)

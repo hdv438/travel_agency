@@ -64,13 +64,17 @@ def _linked_contractor_or_staff_write(placement):
 
 
 @frappe.whitelist()
-def upload_contract(placement_name, file_url):
+def upload_contract(placement_name=None, file_url=None, **kwargs):
 	"""Standard track (Part I Step 4): attach the signed contract to an already-selected
 	Placement (created by portal_api.select_candidate in Step 3) and extract contract_signed_date
 	plus, per destination_country, the structured fields contract_parser.parse_contract_file
 	knows how to pull out (Saudi: contract#/visa#/employer/agency; Kuwait: employer/site/
 	duration/salary only -- its template carries far less). Either the contractor who made the
 	selection, or internal staff (Contract Parser and the general fallback roles), may upload."""
+	if not placement_name:
+		frappe.throw("placement_name is required.", frappe.ValidationError)
+	if not file_url:
+		frappe.throw("file_url is required.", frappe.ValidationError)
 	placement = frappe.get_doc("Placement", placement_name)
 	_linked_contractor_or_staff_write(placement)
 
@@ -85,11 +89,15 @@ def upload_contract(placement_name, file_url):
 
 
 @frappe.whitelist()
-def upload_visa(placement_name, file_url):
+def upload_visa(placement_name=None, file_url=None, **kwargs):
 	"""Kuwait only: a separate document from the contract, uploaded alongside it. Carries
 	visa_number/type/dates plus the agency name/license the Kuwait contract itself never has.
 	Cross-checks the parsed agency identity against this Placement's actual Contractor and
 	flags a mismatch (notify, never auto-reassigns)."""
+	if not placement_name:
+		frappe.throw("placement_name is required.", frappe.ValidationError)
+	if not file_url:
+		frappe.throw("file_url is required.", frappe.ValidationError)
 	placement = frappe.get_doc("Placement", placement_name)
 	if placement.destination_country != "Kuwait":
 		frappe.throw("Visa upload is only applicable to Kuwait placements.", frappe.ValidationError)
@@ -123,7 +131,7 @@ def upload_visa(placement_name, file_url):
 
 
 @frappe.whitelist()
-def create_muayena_placement(applicant_name, contractor_name, file_url=None):
+def create_muayena_placement(applicant_name=None, contractor_name=None, file_url=None, **kwargs):
 	"""Muayena track (Part A.1 / Part I Step 4): "enters directly at Selected with contract in
 	hand" — no portal, no CV. Internal staff (Registrar/Manager/Admin/Contract Parser) only —
 	a Muayena candidate is matched to an agency directly, not through the public portal.
@@ -136,6 +144,10 @@ def create_muayena_placement(applicant_name, contractor_name, file_url=None):
 	*can* carry a labeled agency name/license for cross-checking, but auto-assignment isn't
 	attempted at creation time either way; Kuwait's contract never carries one at all.
 	"""
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
+	if not contractor_name:
+		frappe.throw("contractor_name is required.", frappe.ValidationError)
 	applicant = frappe.get_doc("Applicant", applicant_name)
 	if not applicant.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
@@ -193,11 +205,13 @@ def create_muayena_placement(applicant_name, contractor_name, file_url=None):
 
 
 @frappe.whitelist()
-def record_selected_medical_result(placement_name, status, examination_date=None, expiry_date=None):
+def record_selected_medical_result(placement_name=None, status=None, examination_date=None, expiry_date=None, **kwargs):
 	"""New post-contract medical checkpoint (2026-08-29): gates Selected -> Processing (see
 	state_machine.medical_selected_gate). FIT just records the result; UNFIT cancels the whole
 	Applicant + Placement via the same cascade as applicant_api.cancel_applicant, uniformly
 	for every track/country -- nothing forward from here."""
+	if not placement_name:
+		frappe.throw("placement_name is required.", frappe.ValidationError)
 	if status not in ("FIT", "UNFIT"):
 		frappe.throw("status must be 'FIT' or 'UNFIT'.", frappe.ValidationError)
 	placement = frappe.get_doc("Placement", placement_name)
@@ -219,13 +233,15 @@ def record_selected_medical_result(placement_name, status, examination_date=None
 
 
 @frappe.whitelist()
-def record_predeparture_medical_result(placement_name, status, examination_date=None):
+def record_predeparture_medical_result(placement_name=None, status=None, examination_date=None, **kwargs):
 	"""Pre-departure medical checkpoint (~72h before flight, Part A.2 Stage 8 / Step 6): gates
 	Ticketed -> Departed (see state_machine.medical_2_gate). Mirrors
 	record_selected_medical_result's shape -- FIT just records the result and lets
 	advance_placement(new_status="Departed") pass the gate; UNFIT cancels the whole Applicant +
 	Placement via the same cascade, since a failed pre-departure medical this late (ticket
 	already purchased) has no forward path either, same as the earlier Selected-stage check."""
+	if not placement_name:
+		frappe.throw("placement_name is required.", frappe.ValidationError)
 	if status not in ("FIT", "UNFIT"):
 		frappe.throw("status must be 'FIT' or 'UNFIT'.", frappe.ValidationError)
 	placement = frappe.get_doc("Placement", placement_name)
@@ -287,7 +303,7 @@ def advance_placement(placement_name=None, new_status=None, override_reason=None
 
 
 @frappe.whitelist()
-def record_ticket_details(placement_name, ticket_number, flight_date, ticket_cost=None, currency=None):
+def record_ticket_details(placement_name=None, ticket_number=None, flight_date=None, ticket_cost=None, currency=None, **kwargs):
 	"""Ticketer role. ticket_cost (if given) auto-logs a Pending Applicant Transaction expense
 	-- same pattern as clearance-step payments, everything money-related feeds the one Finance
 	ledger.
@@ -299,6 +315,12 @@ def record_ticket_details(placement_name, ticket_number, flight_date, ticket_cos
 	as it always was -- only the failure boundary changed). The cost log is best-effort from
 	here on: failure is reported back to the caller as a warning, not a fatal error for the
 	whole call."""
+	if not placement_name:
+		frappe.throw("placement_name is required.", frappe.ValidationError)
+	if not ticket_number:
+		frappe.throw("ticket_number is required.", frappe.ValidationError)
+	if not flight_date:
+		frappe.throw("flight_date is required.", frappe.ValidationError)
 	placement = frappe.get_doc("Placement", placement_name)
 	if not placement.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
@@ -334,9 +356,13 @@ def record_ticket_details(placement_name, ticket_number, flight_date, ticket_cos
 
 
 @frappe.whitelist()
-def record_reschedule(placement_name, reschedule_date, reschedule_cause, reschedule_cost=None, currency=None):
+def record_reschedule(placement_name=None, reschedule_date=None, reschedule_cause=None, reschedule_cost=None, currency=None, **kwargs):
 	"""Ticketer role. reschedule_cost is only meaningful/loggable when cause is Internal --
 	an airline/airport-caused reschedule isn't billed to us."""
+	if not placement_name:
+		frappe.throw("placement_name is required.", frappe.ValidationError)
+	if not reschedule_date:
+		frappe.throw("reschedule_date is required.", frappe.ValidationError)
 	if reschedule_cause not in ("Internal", "Airport"):
 		frappe.throw("reschedule_cause must be 'Internal' or 'Airport'.", frappe.ValidationError)
 	placement = frappe.get_doc("Placement", placement_name)

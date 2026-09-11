@@ -117,9 +117,11 @@ def log_stage_income(amount=None, currency=None, description=None, placement=Non
 
 
 @frappe.whitelist()
-def approve_transaction(transaction_name):
+def approve_transaction(transaction_name=None, **kwargs):
 	"""Finance Manager/Admin only. Moves Pending -> Approved via the sanctioned transition()
 	path -- only Approved entries count toward ledger/balance totals (Part D)."""
+	if not transaction_name:
+		frappe.throw("transaction_name is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 
@@ -131,9 +133,11 @@ def approve_transaction(transaction_name):
 
 
 @frappe.whitelist()
-def reject_transaction(transaction_name, rejection_reason):
+def reject_transaction(transaction_name=None, rejection_reason=None, **kwargs):
 	"""Finance Manager/Admin only, mandatory reason. Pending -> Rejected; never counts toward
 	the ledger."""
+	if not transaction_name:
+		frappe.throw("transaction_name is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if not rejection_reason:
@@ -146,12 +150,14 @@ def reject_transaction(transaction_name, rejection_reason):
 
 
 @frappe.whitelist()
-def void_transaction(transaction_name, void_reason):
+def void_transaction(transaction_name=None, void_reason=None, **kwargs):
 	"""No hard delete, ever (addendum). Finance Manager/Admin only, mandatory reason. Only
 	legal from Approved (ALLOWED_TRANSITIONS enforces this — transition() itself rejects
 	voiding a Pending/Rejected row). Routed through transition() like every other status
 	change (never doc.status = X; doc.save() directly) -- the row stays visible with its
 	status flagged and a Process Event on the audit trail, never disappears."""
+	if not transaction_name:
+		frappe.throw("transaction_name is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if not void_reason:
@@ -212,10 +218,12 @@ def list_transactions(
 
 
 @frappe.whitelist()
-def trigger_early_commission_accrual(placement_name):
+def trigger_early_commission_accrual(placement_name=None, **kwargs):
 	"""Part D: "Manual early-trigger (idempotency-guarded either way)" — for cases needing to
 	bill sooner than Departed. Same accrue_commission() as the automatic path, so calling this
 	and then later reaching Departed naturally is a no-op the second time."""
+	if not placement_name:
+		frappe.throw("placement_name is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin", "Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	placement = frappe.get_doc("Placement", placement_name)
@@ -226,7 +234,9 @@ def trigger_early_commission_accrual(placement_name):
 
 
 @frappe.whitelist()
-def get_fx_rate(currency, as_of_date=None):
+def get_fx_rate(currency=None, as_of_date=None, **kwargs):
+	if not currency:
+		frappe.throw("currency is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	rate, rate_date = _get_fx_rate(currency, as_of_date)
@@ -234,7 +244,9 @@ def get_fx_rate(currency, as_of_date=None):
 
 
 @frappe.whitelist()
-def set_fx_rate(currency, rate_to_birr=None, rate_date=None, **kwargs):
+def set_fx_rate(currency=None, rate_to_birr=None, rate_date=None, **kwargs):
+	if not currency:
+		frappe.throw("currency is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	rate = rate_to_birr or kwargs.get("rate_to_etb") or kwargs.get("rate")
@@ -449,11 +461,13 @@ def get_commission_batch(batch_name=None, **kwargs):
 
 
 @frappe.whitelist()
-def settle_batch(batch_name, settlement_reference):
+def settle_batch(batch_name=None, settlement_reference=None, **kwargs):
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if not batch_name or not frappe.db.exists("Commission Batch Request", batch_name):
 		frappe.throw("A valid batch_name is required.", frappe.ValidationError)
+	if not settlement_reference:
+		frappe.throw("settlement_reference is required.", frappe.ValidationError)
 	return settle_batch_request(batch_name, settlement_reference).as_dict()
 
 
@@ -498,11 +512,13 @@ def record_batch_advance(batch_name=None, advance_amount=None, advance_reference
 
 
 @frappe.whitelist()
-def settle_batch_items(item_names):
+def settle_batch_items(item_names=None, **kwargs):
 	"""AGREED_SPEC.md Part 7.3 (backend-issues #09): explicit multi-select manual settlement,
 	alongside upload_batch_payment_proof's best-effort parser -- marks specific Commission
 	Batch Item child rows Paid and syncs each affected batch's status (Partially Settled until
 	every item is Paid, then Settled)."""
+	if not item_names:
+		frappe.throw("item_names is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if isinstance(item_names, str):
@@ -511,19 +527,25 @@ def settle_batch_items(item_names):
 
 
 @frappe.whitelist()
-def upload_batch_payment_proof(batch_name, file_url):
+def upload_batch_payment_proof(batch_name=None, file_url=None, **kwargs):
 	"""AGREED_SPEC.md Part 7.3 (backend-issues #09): parses a CSV or PDF listing paid applicant
 	names (best-effort), fuzzy-matches against this batch's own item list, marks matched items
 	Paid. Unmatched names stay Pending for manual settle_batch_items review -- never blocks."""
+	if not batch_name:
+		frappe.throw("batch_name is required.", frappe.ValidationError)
+	if not file_url:
+		frappe.throw("file_url is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	return match_batch_payment_proof(batch_name, file_url)
 
 
 @frappe.whitelist()
-def get_batch_invoice_pdf(batch_name):
+def get_batch_invoice_pdf(batch_name=None, **kwargs):
 	"""AGREED_SPEC.md Part 7.3 (backend-issues #09): on-demand PDF (applicant names + amounts),
 	built fresh whenever requested, not pre-generated/stored at batch creation."""
+	if not batch_name:
+		frappe.throw("batch_name is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	frappe.local.response.filename = f"{batch_name}-invoice.pdf"
@@ -532,10 +554,12 @@ def get_batch_invoice_pdf(batch_name):
 
 
 @frappe.whitelist()
-def enqueue_get_batch_invoice_pdf(batch_name):
+def enqueue_get_batch_invoice_pdf(batch_name=None, **kwargs):
 	"""Async twin of get_batch_invoice_pdf -- same permission gate, but returns a Background Job
 	reference immediately instead of blocking on the render. Poll
 	background_jobs.get_job_status(job) for the result."""
+	if not batch_name:
+		frappe.throw("batch_name is required.", frappe.ValidationError)
 	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if not frappe.db.exists("Commission Batch Request", batch_name):
