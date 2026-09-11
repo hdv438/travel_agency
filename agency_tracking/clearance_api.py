@@ -165,7 +165,7 @@ def start_clearance_step(clearance_step_name=None, step_name=None, name=None, **
 
 
 @frappe.whitelist()
-def submit_embassy_step(clearance_step_name=None, **kwargs):
+def submit_embassy_step(clearance_step_name=None, override_reason=None, **kwargs):
 	"""Documents submitted (Monday). Saudi/Kuwait Embassy only."""
 	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
 	step = _load_actionable_step(clearance_step_name, {"Embassy", "Kuwait Embassy", "Saudi Embassy"})
@@ -176,9 +176,55 @@ def submit_embassy_step(clearance_step_name=None, **kwargs):
 	# S-2: submit only from a pre-submit state (not from an already-Stamped/Rejected step).
 	if step.status not in ("Pending", "In Progress"):
 		frappe.throw(f"An embassy step that is '{step.status}' cannot be submitted.", frappe.ValidationError)
+	# Wakala (Saudi corridor only -- Kuwait's own "Kuwait Embassy" step_type doesn't carry this
+	# fee, see wakala_amount's depends_on) must be Paid before documents go out, per this field's
+	# own documented rule. Previously undocumented in code -- nothing actually enforced it, so a
+	# step could be Submitted regardless of Wakala status. Manager/Admin/System Manager can still
+	# push through unpaid with a written reason, same override pattern used elsewhere (Part C).
+	if step.step_type == "Embassy" and step.wakala_status != "Paid":
+		is_management = bool({"Manager", "Admin", "System Manager"} & set(frappe.get_roles()))
+		if not (is_management and override_reason):
+			frappe.throw(
+				"Wakala must be Paid before Embassy documents can be Submitted.",
+				frappe.ValidationError,
+			)
+		log_action(
+			"Clearance Step",
+			step.name,
+			f"[{step.title or step.name}] Submitted with Wakala unpaid (Manager override): {override_reason}",
+		)
 	step.status = "Submitted"
 	step.date_started = today()
 	step.save(ignore_permissions=True)
+	return step.as_dict()
+
+
+@frappe.whitelist()
+def record_wakala_payment(clearance_step_name=None, wakala_status=None, wakala_amount=None, paid_date=None, **kwargs):
+	"""Record the Saudi Embassy step's Wakala fee payment (paid by the foreign agency, not
+	internal staff -- this just records that it landed). Embassy-step-only: Kuwait's own
+	"Kuwait Embassy" step_type doesn't carry a Wakala fee (see wakala_amount's depends_on).
+
+	Replaces the previous only-way-to-change-it: a raw desk-form field edit, which had no role
+	gate beyond blanket Clearance Step write access (shared by every clearance-country role, not
+	just Embassy), no validation, and no audit trail."""
+	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
+	step = _load_actionable_step(clearance_step_name, {"Embassy"})
+	if not _can_act_on_step(step):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	if wakala_status and wakala_status not in ("Pending", "Paid"):
+		frappe.throw(f"Invalid Wakala status '{wakala_status}'.", frappe.ValidationError)
+	if wakala_amount is not None:
+		step.wakala_amount = wakala_amount
+	if wakala_status:
+		step.wakala_status = wakala_status
+		step.wakala_paid_date = (paid_date or today()) if wakala_status == "Paid" else None
+	step.save(ignore_permissions=True)
+	log_action(
+		"Clearance Step",
+		step.name,
+		f"[{step.title or step.name}] Wakala {step.wakala_status}: {step.wakala_amount or '-'}",
+	)
 	return step.as_dict()
 
 

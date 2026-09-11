@@ -1970,7 +1970,7 @@
           "Clearance Steps"
         ],
         "summary": "Submit an Embassy step's documents (Monday)",
-        "description": "Saudi/Kuwait Embassy only. Pending -> Submitted. Blocked (417) once the step is already terminal (Issued/Complete/Stamped/Rejected) or its parent Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-3).",
+        "description": "Saudi/Kuwait Embassy only. Pending -> Submitted. Blocked (417) once the step is already terminal (Issued/Complete/Stamped/Rejected) or its parent Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-3). New (2026-09-11): also blocked (417) for a Saudi-corridor Embassy step whose Wakala fee isn't yet Paid, unless the caller is Manager/Admin/System Manager AND passes override_reason -- see record_wakala_payment for the normal way to clear this.",
         "x-roles": [
           "Manager/Admin",
           "The ToDo-assigned officer",
@@ -1986,6 +1986,84 @@
             "in": "formData",
             "type": "string",
             "required": true
+          },
+          {
+            "name": "override_reason",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Manager/Admin/System Manager only: push the submission through despite an unpaid Wakala fee, with a mandatory written reason logged to the audit trail (Process Event)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "$ref": "#/definitions/ClearanceStepDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.clearance_api.record_wakala_payment": {
+      "post": {
+        "tags": [
+          "Clearance Steps"
+        ],
+        "summary": "Record the Saudi Embassy step's Wakala fee payment",
+        "description": "New (2026-09-11). Saudi corridor Embassy step_type only -- Kuwait's own \"Kuwait Embassy\" step_type doesn't carry a Wakala fee. Paid by the foreign agency (Contractor), not internal staff -- this endpoint just records that it landed, and is what clears the submit_embassy_step Wakala-unpaid block for this step. Replaces the previous only-way-to-change-it (a raw desk-form field edit with no role gate beyond blanket Clearance Step write access, no validation, no audit trail) -- this endpoint gates on the same actionable-step rule as submit/stamp/reject_embassy_step and logs a Process Event.",
+        "x-roles": [
+          "Manager/Admin",
+          "The ToDo-assigned officer",
+          "Saudi Embassy role"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "clearance_step_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "wakala_status",
+            "in": "formData",
+            "type": "string",
+            "enum": ["Pending", "Paid"],
+            "required": false
+          },
+          {
+            "name": "wakala_amount",
+            "in": "formData",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "paid_date",
+            "in": "formData",
+            "type": "string",
+            "format": "date",
+            "required": false,
+            "description": "Defaults to today when wakala_status is set to Paid; ignored otherwise."
           }
         ],
         "responses": {
