@@ -134,14 +134,22 @@ permission_query_conditions = {
 
 # Single-document read/write gate. Background Job: load-bearing for its result PDF's own
 # permission check (a private File's download falls through to has_permission("read") on its
-# attached_to_doctype/_name), not just an audit-log-style role grant. Clearance Step (2026-09-11):
-# get_permission_query_conditions above only filters list/report queries, not a single
-# frappe.get_doc()/doc.save()/REST /api/resource/<name> call -- without this, any clearance-
-# country role's blanket DocType-level write (every one of them has "write": 1 in
-# clearance_step.json) reaches every row by name regardless of step_type, even one that role can
-# never see in any list.
+# attached_to_doctype/_name), not just an audit-log-style role grant. Everything else here
+# (2026-09-11): get_permission_query_conditions above only filters list/report queries, not a
+# single frappe.get_doc()/doc.save()/REST /api/resource/<name> call -- without a matching
+# has_permission hook, any role with blanket DocType-level read/write (every one of these
+# doctypes' JSON grants it to roles the query-condition means to scope down) reaches every row
+# by name, bypassing the scoping entirely, even rows that role can never see in any list.
+# Audited all 7 permission_query_conditions entries above for this same gap; Commission Batch
+# Request is the one exception -- its DocType JSON grants no role beyond
+# Admin/Finance Manager/System Manager, all of which the query condition already fully trusts,
+# so there's nothing for a single-doc call to bypass.
 has_permission = {
 	"Background Job": "agency_tracking.agency_tracking.doctype.background_job.background_job.has_permission",
+	"Process Event": "agency_tracking.agency_tracking.doctype.process_event.process_event.has_permission",
+	"Applicant Transaction": "agency_tracking.agency_tracking.doctype.applicant_transaction.applicant_transaction.has_permission",
+	"Placement": "agency_tracking.agency_tracking.doctype.placement.placement.has_permission",
+	"Applicant": "agency_tracking.agency_tracking.doctype.applicant.applicant.has_permission",
 	"Clearance Step": "agency_tracking.agency_tracking.doctype.clearance_step.clearance_step.has_permission",
 }
 

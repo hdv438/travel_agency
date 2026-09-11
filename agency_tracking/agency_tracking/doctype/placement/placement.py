@@ -55,3 +55,23 @@ def get_permission_query_conditions(user):
 		return "1=0"
 	escaped = ", ".join(frappe.db.escape(t) for t in types)
 	return f"`tabPlacement`.name in (select placement from `tabClearance Step` where step_type in ({escaped}))"
+
+
+def has_permission(doc, ptype=None, user=None):
+	"""Single-document mirror of get_permission_query_conditions above (2026-09-11, same class
+	of gap found and fixed for Clearance Step/Background Job/Process Event/Applicant Transaction
+	this session): every corridor role (Saudi/Kuwait LMIS, Taeshir, Telesign, Embassy) also has
+	blanket DocType-level read on Placement (placement.json), so without this any of them could
+	read ANY placement by name -- not just ones with a clearance step of their own type -- despite
+	being correctly scoped in every list view."""
+	from agency_tracking.agency_tracking.doctype.clearance_step.clearance_step import scoped_clearance_step_types
+
+	user = user or frappe.session.user
+	if not doc or not doc.get("name"):
+		return True
+	types = scoped_clearance_step_types(user)
+	if types is None:
+		return True
+	if not types:
+		return False
+	return bool(frappe.db.exists("Clearance Step", {"placement": doc.name, "step_type": ["in", types]}))

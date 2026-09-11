@@ -34,3 +34,19 @@ def get_permission_query_conditions(user):
 	if {"Finance Manager", "Admin"} & set(frappe.get_roles(user)):
 		return ""
 	return f"`tabApplicant Transaction`.logged_by = {frappe.db.escape(user)}"
+
+
+def has_permission(doc, ptype=None, user=None):
+	"""Single-document mirror of get_permission_query_conditions above (2026-09-11, same class
+	of gap found and fixed for Clearance Step/Background Job earlier this session): every
+	internal-staff role that can create a transaction (Registrar, Clearance Officer, Ticketer,
+	Complaint Manager, Contract Parser, all six corridor roles -- per
+	applicant_transaction.json) also has blanket DocType-level read, so without this any of them
+	could read ANY Applicant Transaction by name -- amounts, currency, applicant, everything --
+	despite being restricted to rows they themselves logged in every list view."""
+	user = user or frappe.session.user
+	if not doc or not doc.get("name"):
+		return True
+	if {"Finance Manager", "Admin"} & set(frappe.get_roles(user)):
+		return True
+	return doc.get("logged_by") == user

@@ -132,6 +132,59 @@ def list_employees():
 	return users
 
 
+@frappe.whitelist()
+def list_employee_roster():
+	"""Lightweight staff roster (name/email/roles only, enabled accounts) for internal features
+	that need to know who holds which role but aren't staff *administration* itself --
+	clearance-step assignment pickers, chat participant role labels. Open to any internal staff
+	role (agency_tracking.roles.INTERNAL_STAFF_ROLES), not just Admin/Manager/System Manager like
+	list_employees -- a Ticketer legitimately needs to see who holds "Saudi LMIS" to assign a
+	step to them. Deliberately excludes phone/mobile_no/creation/user_type/enabled-toggle --
+	just enough to pick a colleague by role, nothing account-management-shaped.
+
+	2026-09-11: added to replace the frontend's own raw frappe.client.get_list + a
+	frappe.client.get PER USER on the User doctype directly, found live -- that path had no role
+	gate at all (Frappe's own default User read permission let any Desk User, i.e. any employee,
+	reach it), returned full User documents, and was an N+1 query besides."""
+	from agency_tracking.roles import INTERNAL_STAFF_ROLES
+
+	if frappe.session.user != "Administrator" and not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	users = frappe.get_all(
+		"User",
+		filters=[
+			["User", "user_type", "=", "System User"],
+			["User", "name", "!=", "Guest"],
+			["User", "enabled", "=", 1],
+		],
+		fields=["name", "email", "full_name", "first_name", "last_name", "enabled"],
+		order_by="full_name asc",
+		limit_page_length=200,
+	)
+	user_names = [u["name"] for u in users]
+	if not user_names:
+		return []
+
+	all_roles = frappe.get_all(
+		"Has Role",
+		filters={"parent": ["in", user_names]},
+		fields=["parent", "role"],
+	)
+	roles_by_user = {}
+	for r in all_roles:
+		if r["role"] not in ("All",):
+			roles_by_user.setdefault(r["parent"], []).append(r["role"])
+
+	for u in users:
+		raw = roles_by_user.get(u["name"], [])
+		if u["name"] == "Administrator":
+			raw = list(raw) + ["Admin"]
+		u["roles"] = _display_roles(raw)
+
+	return users
+
+
 def _validate_no_conflicting_roles(role_list):
 	"""Segregation of duties & multi-tenant isolation: Foreign Agency (partner portal)
 	cannot be combined with internal staff roles."""

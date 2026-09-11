@@ -327,3 +327,26 @@ def get_permission_query_conditions(user):
 		"`tabApplicant`.name in (select applicant from `tabPlacement` where name in "
 		f"(select placement from `tabClearance Step` where step_type in ({escaped})))"
 	)
+
+
+def has_permission(doc, ptype=None, user=None):
+	"""Single-document mirror of get_permission_query_conditions above (2026-09-11, same class
+	of gap found and fixed for Clearance Step/Background Job/Process Event/Applicant
+	Transaction/Placement this session): every corridor role also has blanket DocType-level read
+	on Applicant (applicant.json), so without this any of them could read ANY applicant's record
+	-- passport number, DOB, photos, everything -- by name, despite being correctly scoped in
+	every list view."""
+	from agency_tracking.agency_tracking.doctype.clearance_step.clearance_step import scoped_clearance_step_types
+
+	user = user or frappe.session.user
+	if not doc or not doc.get("name"):
+		return True
+	types = scoped_clearance_step_types(user)
+	if types is None:
+		return True
+	if not types:
+		return False
+	placement_names = frappe.db.get_all("Placement", filters={"applicant": doc.name}, pluck="name")
+	if not placement_names:
+		return False
+	return bool(frappe.db.exists("Clearance Step", {"placement": ["in", placement_names], "step_type": ["in", types]}))
