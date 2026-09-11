@@ -362,8 +362,7 @@ def select_candidate(applicant_name=None, free_replacement_for_complaint=None, c
 	# select_candidate() for the same applicant blocks here until the first is done, then
 	# sees active_placement already set and is rejected. Without this, two agencies could
 	# both read active_placement as empty before either had written it.
-	lock_applicant_row(applicant_name)
-	current_lock = frappe.db.get_value("Applicant", applicant_name, "active_placement")
+	current_lock = lock_applicant_row(applicant_name)
 	if current_lock:
 		# Same isolation gate as the pre-lock path — a placement that appeared while we waited on
 		# the row lock is returned only if it is ours (idempotent), otherwise a bare 403. This is

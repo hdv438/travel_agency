@@ -38,8 +38,19 @@ def log_action(reference_doctype, reference_name, remarks, event_type="Action", 
 def lock_applicant_row(applicant_name):
 	"""Row-level lock (SELECT ... FOR UPDATE), held until the current request's transaction
 	commits. Used anywhere two concurrent requests could both read active_placement as empty
-	before either writes it — portal selection (Step 3) and Muayena direct-entry (Step 4)."""
-	frappe.db.sql("SELECT `name` FROM `tabApplicant` WHERE `name`=%s FOR UPDATE", applicant_name)
+	before either writes it — portal selection (Step 3) and Muayena direct-entry (Step 4).
+
+	Returns the CURRENT active_placement value, read via this same locking query. Callers must
+	use this return value for their check, not a separate plain frappe.db.get_value() afterward
+	(2026-09-11 fix, found live): under MySQL's REPEATABLE READ, a locking read (FOR UPDATE)
+	always sees the latest committed data, but a plain SELECT in an already-open transaction can
+	still be bound to a snapshot fixed by an earlier plain read elsewhere in the same request
+	(e.g. loading the Applicant doc before calling this) — so a plain re-check after the lock can
+	silently return stale data even though the row itself is genuinely locked and fresh."""
+	rows = frappe.db.sql(
+		"SELECT `active_placement` FROM `tabApplicant` WHERE `name`=%s FOR UPDATE", applicant_name
+	)
+	return rows[0][0] if rows else None
 
 
 # Fields that describe *where a record sits in its lifecycle* or *which record it is* -- never

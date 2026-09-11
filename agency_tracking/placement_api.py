@@ -136,7 +136,6 @@ def create_muayena_placement(applicant_name, contractor_name, file_url=None):
 	*can* carry a labeled agency name/license for cross-checking, but auto-assignment isn't
 	attempted at creation time either way; Kuwait's contract never carries one at all.
 	"""
-	lock_applicant_row(applicant_name)
 	applicant = frappe.get_doc("Applicant", applicant_name)
 	if not applicant.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
@@ -155,11 +154,28 @@ def create_muayena_placement(applicant_name, contractor_name, file_url=None):
 		)
 	if not applicant.destination_country:
 		frappe.throw(f"{applicant_name} has no destination_country set.", frappe.ValidationError)
-	current_lock = frappe.db.get_value("Applicant", applicant_name, "active_placement")
+
+	# Parse BEFORE taking the row lock, not after (2026-09-11 fix): real contract text
+	# extraction can be slow, and it never touches active_placement, so it must not hold this
+	# lock -- confirmed live that a held SELECT ... FOR UPDATE blocks even a plain, unrelated
+	# doc.save() on the same Applicant row until the holder's transaction commits. A slow parse
+	# here was silently turning into "editing THIS ONE applicant hangs/fails" for anyone else,
+	# while every other applicant worked fine. select_candidate (portal_api.py) already gets
+	# this right -- lock held only across the fast check-and-insert, nothing slow in between.
+	#
+	# Commit here (nothing but reads happened above -- harmless) to close out this transaction
+	# before the slow parse, so the read above can never pin a stale REPEATABLE READ snapshot
+	# across it. Without this, a concurrent request that commits an active_placement change
+	# during the parse window causes the *locking* re-read below to hit a hard MySQL error
+	# (ER_CHECKREAD, "Record has changed since last read") instead of the clean "already has an
+	# active Placement" rejection it's supposed to fail with -- confirmed live.
+	frappe.db.commit()
+	extracted = parse_contract_file(file_url, applicant.destination_country) if file_url else {}
+
+	current_lock = lock_applicant_row(applicant_name)
 	if current_lock:
 		frappe.throw(f"{applicant_name} already has an active Placement.", frappe.ValidationError)
 
-	extracted = parse_contract_file(file_url, applicant.destination_country) if file_url else {}
 	placement = frappe.get_doc(
 		{
 			"doctype": "Placement",
