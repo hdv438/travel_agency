@@ -109,29 +109,28 @@ frappe.ui.form.on('Applicant', {
 	},
 
 	autofill_passport_mrz(frm) {
+		// Enqueue + poll (not the blocking parse_passport_file) -- OCR on a large/non-passport
+		// image can run long enough to hit the platform edge proxy's timeout, which 502s the
+		// browser while the backend is still working. Queuing keeps the HTTP request itself fast
+		// regardless of how long the actual OCR takes.
 		if (!frm.doc.passport_scan) {
 			frappe.msgprint(__('Please upload a Passport Scan file first.'));
 			return;
 		}
+		frappe.dom.freeze(__('Parsing Passport MRZ...'));
 		frappe.call({
-			method: 'agency_tracking.passport_parser.parse_passport_file',
+			method: 'agency_tracking.passport_parser.enqueue_parse_passport_file',
 			args: { file_url: frm.doc.passport_scan },
-			freeze: true,
-			freeze_message: __('Parsing Passport MRZ...'),
 			callback(r) {
-				if (r.message && Object.keys(r.message).length > 0) {
-					$.each(r.message, (field, val) => {
-						if (val && !frm.doc[field]) {
-							frm.set_value(field, val);
-						}
-					});
-					frappe.show_alert({
-						message: __('Passport data extracted and populated!'),
-						indicator: 'green',
-					});
-				} else {
-					frappe.msgprint(__('Could not extract MRZ data from the uploaded scan.'));
+				if (!r.message || !r.message.job) {
+					frappe.dom.unfreeze();
+					frappe.msgprint(__('Could not start passport parsing.'));
+					return;
 				}
+				poll_passport_mrz_job(frm, r.message.job);
+			},
+			error() {
+				frappe.dom.unfreeze();
 			},
 		});
 	},
@@ -294,3 +293,62 @@ frappe.ui.form.on('Applicant', {
 		);
 	},
 });
+
+// Polling for autofill_passport_mrz's enqueue_parse_passport_file job. Standalone (not a form
+// event) so it can recurse via setTimeout without fighting frm.trigger's argument-passing rules.
+const PASSPORT_MRZ_POLL_INTERVAL_MS = 1500;
+const PASSPORT_MRZ_POLL_GIVE_UP_MS = 5 * 60 * 1000; // background job itself keeps running past this
+
+function poll_passport_mrz_job(frm, job_name, elapsed_ms = 0) {
+	frappe.call({
+		method: 'agency_tracking.background_jobs.get_job_status',
+		args: { job_name },
+		callback(r) {
+			const job = r.message;
+			if (!job) {
+				frappe.dom.unfreeze();
+				frappe.msgprint(__('Lost track of the passport parsing job.'));
+				return;
+			}
+
+			if (job.status === 'Completed') {
+				frappe.dom.unfreeze();
+				const fields = job.result || {};
+				if (Object.keys(fields).length > 0) {
+					$.each(fields, (field, val) => {
+						if (val && !frm.doc[field]) {
+							frm.set_value(field, val);
+						}
+					});
+					frappe.show_alert({
+						message: __('Passport data extracted and populated!'),
+						indicator: 'green',
+					});
+				} else {
+					frappe.msgprint(__('Could not extract MRZ data from the uploaded scan.'));
+				}
+				return;
+			}
+
+			if (job.status === 'Failed') {
+				frappe.dom.unfreeze();
+				frappe.msgprint(__('Passport parsing failed: {0}', [job.error || __('Unknown error')]));
+				return;
+			}
+
+			// Still Queued/Running.
+			if (elapsed_ms >= PASSPORT_MRZ_POLL_GIVE_UP_MS) {
+				frappe.dom.unfreeze();
+				frappe.msgprint(__('Passport parsing is taking longer than expected. It is still running in the background -- click Auto-Fill from Passport again shortly to check.'));
+				return;
+			}
+			setTimeout(
+				() => poll_passport_mrz_job(frm, job_name, elapsed_ms + PASSPORT_MRZ_POLL_INTERVAL_MS),
+				PASSPORT_MRZ_POLL_INTERVAL_MS
+			);
+		},
+		error() {
+			frappe.dom.unfreeze();
+		},
+	});
+}
