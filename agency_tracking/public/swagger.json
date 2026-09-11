@@ -6784,6 +6784,33 @@
         }
       }
     },
+    "/api/method/agency_tracking.employee_api.list_employee_roster": {
+      "post": {
+        "tags": [
+          "Employees & Identity"
+        ],
+        "summary": "Lightweight staff roster (name/email/roles only) for internal features",
+        "description": "New (2026-09-11). Open to any INTERNAL_STAFF_ROLES member, not just Admin/Manager/System Manager -- unlike list_employees, this is for features that need to know who holds which role (clearance-step assignment pickers, chat participant labels) without being staff administration itself. Returns only name/email/full_name/first_name/last_name/enabled/roles for enabled accounts -- no phone/creation/user_type. Added to replace a frontend call path that queried the User doctype directly with no role gate at all.",
+        "x-roles": [
+          "Any INTERNAL_STAFF_ROLES member (Registrar, Clearance Officer, Ticketer, Complaint Manager, Finance Manager, Communication Manager, Manager, Admin, Contract Parser, Medical Officer, the six corridor roles)"
+        ],
+        "consumes": [
+          "application/json",
+          "application/x-www-form-urlencoded"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of enabled staff accounts with name/email/roles"
+          },
+          "403": {
+            "description": "Not permitted (caller holds no internal-staff role)"
+          }
+        }
+      }
+    },
     "/api/method/agency_tracking.employee_api.create_employee": {
       "post": {
         "tags": [
