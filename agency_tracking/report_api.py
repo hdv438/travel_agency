@@ -447,6 +447,43 @@ def _agency_display_name():
 	return name or "Agency Tracking"
 
 
+def _resolve_applicant_and_agency(rows):
+	"""2026-09-12: client-facing exports must never show raw internal IDs (Placement/Applicant
+	link names like PLM-00016) -- replaces them with the actual applicant's name and the foreign
+	agency's real name. Bulk-resolves in three batched queries (never N+1): Placement ->
+	(applicant, contractor), Applicant -> full_name, Contractor -> contractor_name. Mutates each
+	row dict in place, adding `applicant_full_name` / `foreign_agency_name` (blank if nothing to
+	resolve, e.g. a general overhead expense with no placement/applicant at all)."""
+	placement_names = {r.get("placement") for r in rows if r.get("placement")}
+	placement_map = {
+		p.name: p
+		for p in frappe.get_all(
+			"Placement", filters={"name": ["in", list(placement_names) or [""]]}, fields=["name", "applicant", "contractor"]
+		)
+	}
+
+	applicant_names = {r.get("applicant") for r in rows if r.get("applicant")}
+	applicant_names |= {p.applicant for p in placement_map.values() if p.applicant}
+	applicant_full_name = {
+		a.name: a.full_name
+		for a in frappe.get_all("Applicant", filters={"name": ["in", list(applicant_names) or [""]]}, fields=["name", "full_name"])
+	}
+
+	contractor_names = {p.contractor for p in placement_map.values() if p.contractor}
+	contractor_display_name = {
+		c.name: c.contractor_name
+		for c in frappe.get_all("Contractor", filters={"name": ["in", list(contractor_names) or [""]]}, fields=["name", "contractor_name"])
+	}
+
+	for r in rows:
+		placement = placement_map.get(r.get("placement"))
+		applicant_id = r.get("applicant") or (placement.applicant if placement else None)
+		r["applicant_full_name"] = applicant_full_name.get(applicant_id, "") if applicant_id else ""
+		contractor_id = placement.contractor if placement else None
+		r["foreign_agency_name"] = contractor_display_name.get(contractor_id, "") if contractor_id else ""
+	return rows
+
+
 def _xlsx_formats(workbook):
 	"""Shared style set for every .xlsx export in this module (2026-09-12) -- one place so every
 	report looks like it came from the same system, not a bare data dump. Money columns use
@@ -519,6 +556,7 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 		fields=["name", "placement", "applicant", "transaction_type", "amount_original", "currency_original", "amount_birr", "status", "creation"],
 		order_by="creation desc"
 	)
+	_resolve_applicant_and_agency(rows)
 
 	try:
 		import io
@@ -529,7 +567,11 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 		worksheet = workbook.add_worksheet("Commissions")
 		fmt = _xlsx_formats(workbook)
 
-		headers = ["Transaction ID", "Placement", "Applicant", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date"]
+		# 2026-09-12: led with the human-readable identifiers (applicant name, foreign agency),
+		# not internal record IDs (Placement/Applicant link names) -- client-facing, and a raw
+		# "PLM-00016" means nothing to them. Transaction ID kept per explicit request, but moved
+		# to the end as a reference column rather than leading the sheet.
+		headers = ["Applicant", "Foreign Agency", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date", "Transaction ID"]
 		_write_report_header(
 			worksheet, fmt, f"{_agency_display_name()} — Commissions Report",
 			f"Generated {frappe.utils.today()}" + (f"  |  {from_date} to {to_date}" if from_date and to_date else "") + f"  |  {len(rows)} record(s)",
@@ -538,25 +580,20 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 		header_row = 3
 		for col, h in enumerate(headers):
 			worksheet.write(header_row, col, h, fmt["header"])
-		worksheet.set_column(0, 0, 16)
-		worksheet.set_column(1, 2, 16)
-		worksheet.set_column(3, 3, 14)
-		worksheet.set_column(4, 4, 16)
-		worksheet.set_column(5, 5, 10)
-		worksheet.set_column(6, 6, 16)
-		worksheet.set_column(7, 7, 12)
-		worksheet.set_column(8, 8, 14)
+		widths = [22, 24, 14, 16, 10, 16, 12, 14, 16]
+		for col, w in enumerate(widths):
+			worksheet.set_column(col, col, w)
 
 		columns = [
-			(lambda r: r.name, "text"),
-			(lambda r: r.placement, "text"),
-			(lambda r: r.applicant, "text"),
+			(lambda r: r.applicant_full_name, "text"),
+			(lambda r: r.foreign_agency_name, "text"),
 			(lambda r: r.transaction_type, "text"),
 			(lambda r: r.amount_original, "num"),
 			(lambda r: r.currency_original, "text"),
 			(lambda r: r.amount_birr, "num"),
 			(lambda r: r.status, "text"),
 			(lambda r: r.creation, "date"),
+			(lambda r: r.name, "text"),
 		]
 		_write_rows(worksheet, fmt, header_row + 1, rows, columns)
 
@@ -585,9 +622,9 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 	import io
 	output = io.StringIO()
 	writer = csv.writer(output)
-	writer.writerow(["Transaction ID", "Placement", "Applicant", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date"])
+	writer.writerow(["Applicant", "Foreign Agency", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date", "Transaction ID"])
 	for r in rows:
-		writer.writerow([r.name, r.placement or "", r.applicant or "", r.transaction_type, r.amount_original or 0, r.currency_original or "", r.amount_birr or 0, r.status, str(r.creation)[:10]])
+		writer.writerow([r.applicant_full_name or "", r.foreign_agency_name or "", r.transaction_type, r.amount_original or 0, r.currency_original or "", r.amount_birr or 0, r.status, str(r.creation)[:10], r.name])
 
 	frappe.response["filename"] = f"commissions_report_{frappe.utils.today()}.csv"
 	frappe.response["filecontent"] = output.getvalue()
@@ -633,6 +670,7 @@ def export_transactions_xlsx(status=None, transaction_type=None, placement=None,
 		order_by="creation asc",
 		limit_page_length=0,
 	)
+	_resolve_applicant_and_agency(rows)
 
 	import io
 	import xlsxwriter
@@ -642,10 +680,13 @@ def export_transactions_xlsx(status=None, transaction_type=None, placement=None,
 	worksheet = workbook.add_worksheet("Transactions")
 	fmt = _xlsx_formats(workbook)
 
+	# 2026-09-12: same client-facing-name rule as export_commissions_xlsx -- applicant name +
+	# foreign agency name lead the sheet, no raw Placement ID column at all, Transaction ID kept
+	# but pushed to the end as a reference column.
 	headers = [
-		"Transaction ID", "Applicant", "Placement", "Type", "Status", "Original Amount",
+		"Applicant", "Foreign Agency", "Type", "Status", "Original Amount",
 		"Currency", "ETB Amount", "Description", "Logged By", "Approved By", "Approved On",
-		"Rejection Reason", "Logged At",
+		"Rejection Reason", "Logged At", "Transaction ID",
 	]
 	subtitle_bits = [f"Generated {frappe.utils.today()}"]
 	if from_date or to_date:
@@ -660,14 +701,13 @@ def export_transactions_xlsx(status=None, transaction_type=None, placement=None,
 	header_row = 3
 	for col, h in enumerate(headers):
 		worksheet.write(header_row, col, h, fmt["header"])
-	widths = [16, 16, 14, 12, 12, 16, 10, 16, 26, 20, 20, 14, 22, 14]
+	widths = [22, 24, 12, 12, 16, 10, 16, 26, 20, 20, 14, 22, 14, 16]
 	for col, w in enumerate(widths):
 		worksheet.set_column(col, col, w)
 
 	columns = [
-		(lambda r: r.name, "text"),
-		(lambda r: r.applicant, "text"),
-		(lambda r: r.placement, "text"),
+		(lambda r: r.applicant_full_name, "text"),
+		(lambda r: r.foreign_agency_name, "text"),
 		(lambda r: r.transaction_type, "text"),
 		(lambda r: r.status, "text"),
 		(lambda r: r.amount_original, "num"),
@@ -679,6 +719,7 @@ def export_transactions_xlsx(status=None, transaction_type=None, placement=None,
 		(lambda r: r.approved_on, "date"),
 		(lambda r: r.rejection_reason, "text"),
 		(lambda r: r.creation, "date"),
+		(lambda r: r.name, "text"),
 	]
 	_write_rows(worksheet, fmt, header_row + 1, rows, columns)
 
