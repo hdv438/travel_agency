@@ -1688,7 +1688,7 @@
           "Clearance Steps"
         ],
         "summary": "Reopen a Clearance Step's own terminal outcome",
-        "description": "New (2026-09-12). Manager/Admin/System Manager only. Reverses a step's own terminal outcome (Issued/Complete/Stamped/Rejected) back to Pending/In Progress (or Submitted, Embassy only) when the determination itself was wrong, not just its data -- complete_clearance_step's own correction path already covers a wrong reference number/amount/date on an otherwise-correct outcome. Deliberately scoped to only this step: does not cascade into anything downstream (Embassy work already done on the old result, or a Placement that already auto-advanced to Stamped) -- the Stamped->Ticketed gate separately re-checks that every mandatory step is still complete before Ticketing, so a reopened step blocks progress until it's re-completed rather than being silently ignored.",
+        "description": "New (2026-09-12). Manager/Admin/System Manager only. Reverses a step's own terminal outcome (Issued/Complete/Stamped/Rejected) back to Pending/In Progress (or Submitted, Embassy only) when the determination itself was wrong, not just its data -- complete_clearance_step's own correction path already covers a wrong reference number/amount/date on an otherwise-correct outcome. Deliberately scoped to only this step: does not cascade into anything downstream (Embassy work already done on the old result, or a Placement that already auto-advanced to Stamped) -- the Stamped->Ticketed gate separately re-checks that every mandatory step is still complete before Ticketing, so a reopened step blocks progress until it's re-completed rather than being silently ignored. Also recreates task visibility (2026-09-12): whoever originally completed the step gets their own ToDo back, and every current holder of the step_type's mapped role gets a fresh broadcast ToDo, the same as when the step was first created -- its original ToDo was already closed at completion time, so without this the reopened step would silently have no one's queue pointing at it.",
         "x-roles": [
           "Manager/Admin/System Manager"
         ],
@@ -5718,7 +5718,7 @@
           "Clearance Steps"
         ],
         "summary": "Assign / reassign a clearance step to an officer",
-        "description": "Assigns a clearance step to an officer, creating the ToDo the officer acts through.",
+        "description": "Create a ToDo for user against this Clearance Step (closes any existing open one first). Shares one implementation with reassign_clearance_step (2026-09-12, consolidated after finding this endpoint's own separate copy had no terminal-placement guard and wasn't logged -- confirmed live that a Clearance Officer could reassign a step on an already-Departed placement through this name even though reassign_clearance_step correctly refused). Blocked (417) once the parent Placement is Departed/Cancelled; every call now logs a Process Event.",
         "x-roles": [
           "Manager",
           "Admin",
@@ -6486,7 +6486,7 @@
           "Clearance Steps"
         ],
         "summary": "Record Injaz payment on the current attempt",
-        "description": "Mark the current (Active) Injaz attempt Paid, recording amount / currency / receipt. Clears the taeshir_injaz_payment_reminder for this attempt.",
+        "description": "Mark the current (Active) Injaz attempt Paid, recording amount / currency / receipt. Clears the taeshir_injaz_payment_reminder for this attempt. Pass payment_status='Unpaid' (2026-09-12) to correct a mistaken Paid confirmation -- distinct from forfeit_injaz_and_restart, which treats the fee as genuinely lost and opens a new attempt; this is a plain data correction on the same attempt.",
         "x-roles": [
           "Saudi Taeshir",
           "Manager",
@@ -6528,6 +6528,17 @@
             "in": "formData",
             "type": "string",
             "required": false
+          },
+          {
+            "name": "payment_status",
+            "in": "formData",
+            "type": "string",
+            "enum": [
+              "Paid",
+              "Unpaid"
+            ],
+            "required": false,
+            "description": "Defaults to 'Paid'. Pass 'Unpaid' to correct a mistaken confirmation (clears paid_date)."
           }
         ],
         "responses": {

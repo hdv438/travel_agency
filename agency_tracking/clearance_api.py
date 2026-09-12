@@ -7,6 +7,7 @@ import frappe
 from frappe.utils import formatdate, today
 
 from agency_tracking.clearance_engine import assign_clearance_step as _engine_assign_clearance_step
+from agency_tracking.clearance_engine import _broadcast_todo_to_role_holders
 from agency_tracking.agency_tracking.doctype.clearance_step.clearance_step import CLEARANCE_ROLE_BY_STEP_TYPE
 from agency_tracking.pdf_utils import asset_datauri, code128_b_datauri, embed_image_datauri, render_pdf
 from agency_tracking.roles import INTERNAL_STAFF_ROLES
@@ -22,6 +23,21 @@ ORIGIN_AGENCY_EMAIL = "rawnasultan03@gmail.com"
 _RELIGION_MAP = {"Muslim": "Islam"}
 
 
+def _assign_or_reassign(clearance_step_name, user):
+	"""Shared implementation for assign_clearance_step/reassign_clearance_step (2026-09-12,
+	consolidated after finding the two had silently drifted apart): they were two separate
+	whitelisted endpoints doing the identical mutation (cancel any open ToDo, create a new one for
+	`user`), but only reassign_clearance_step had the terminal-placement guard and an audit log --
+	confirmed live that a Clearance-Officer-only account, correctly blocked by
+	reassign_clearance_step on an already-Departed placement, could reassign that exact same step
+	on that exact same placement anyway just by calling assign_clearance_step instead. Routing both
+	through one function means their guards can no longer disagree, whichever name is called."""
+	step = _load_actionable_step(clearance_step_name)
+	_engine_assign_clearance_step(step.name, user)
+	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Assigned to {user}")
+	return step
+
+
 @frappe.whitelist()
 def assign_clearance_step(clearance_step_name=None, user=None, step_name=None, assigned_to=None, **kwargs):
 	"""Assign or reassign a clearance step to an officer."""
@@ -31,8 +47,8 @@ def assign_clearance_step(clearance_step_name=None, user=None, step_name=None, a
 	user = user or assigned_to or kwargs.get("user")
 	if not clearance_step_name or not user:
 		frappe.throw("Both clearance_step_name and user are required.", frappe.ValidationError)
-	_engine_assign_clearance_step(clearance_step_name, user)
-	return {"status": "success", "clearance_step": clearance_step_name, "assigned_to": user}
+	step = _assign_or_reassign(clearance_step_name, user)
+	return {"status": "success", "clearance_step": step.name, "assigned_to": user}
 
 
 # LMIS (both countries) completes to "Issued" -- everything else that uses the plain
@@ -358,11 +374,30 @@ def reassign_clearance_step(clearance_step_name=None, new_officer=None, **kwargs
 		frappe.throw("new_officer is required.", frappe.ValidationError)
 	if not ({"Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
-	step = frappe.get_doc("Clearance Step", clearance_step_name)
-	assert_clearance_step_not_terminal(step)
-	assign_clearance_step(clearance_step_name, new_officer)
-	log_action("Clearance Step", clearance_step_name, f"[{step.title or step.name}] Reassigned to {new_officer}")
-	return {"clearance_step": clearance_step_name, "assigned_to": new_officer}
+	step = _assign_or_reassign(clearance_step_name, new_officer)
+	return {"clearance_step": step.name, "assigned_to": new_officer}
+
+
+def _renotify_reopened_step(step, previous_completed_by):
+	"""2026-09-12 (explicit product decision): recreate task visibility for whoever should pick a
+	reopened step back up, rather than leaving it silently sitting there with no open ToDo (its
+	original one was already closed by _close_open_todos at completion time, confirmed live).
+	Mirrors exactly how the step was first assigned when it was created
+	(clearance_engine.create_clearance_steps): whoever completed it originally gets their own ToDo
+	back first -- they made the call, they're the one who needs to fix it -- then, for the six
+	country+step roles, every current role holder also gets a fresh broadcast ToDo, same as a
+	brand-new step would. Order matters: assigning completed_by first, then broadcasting
+	(additive, never cancels existing ToDos) means completed_by's ToDo survives the broadcast
+	step. Best-effort: never blocks the reopen itself, which has already committed by this point."""
+	try:
+		role = CLEARANCE_ROLE_BY_STEP_TYPE.get(step.step_type)
+		completed_by_gets_broadcast = role and previous_completed_by and role in frappe.get_roles(previous_completed_by)
+		if previous_completed_by and previous_completed_by != "Administrator" and not completed_by_gets_broadcast:
+			_engine_assign_clearance_step(step.name, previous_completed_by)
+		if role:
+			_broadcast_todo_to_role_holders(step.name, role)
+	except Exception:
+		frappe.log_error(title="Reopen re-notify failed", message=f"{step.name}: {frappe.get_traceback()}")
 
 
 @frappe.whitelist()
@@ -401,12 +436,14 @@ def reopen_clearance_step(clearance_step_name=None, reason=None, target_status=N
 		frappe.throw(f"{step.name} is already '{target_status}'.", frappe.ValidationError)
 
 	previous_status = step.status
+	previous_completed_by = step.completed_by
 	step.status = target_status
 	step.date_completed = None
 	step.completed_by = None
 	if is_embassy and previous_status == "Rejected":
 		step.rejection_remark = None
 	step.save(ignore_permissions=True)
+	_renotify_reopened_step(step, previous_completed_by)
 	log_action(
 		"Clearance Step",
 		step.name,
@@ -646,17 +683,24 @@ def reschedule_taeshir_appointment(clearance_step_name=None, new_appointment_dat
 
 
 @frappe.whitelist()
-def record_injaz_payment(clearance_step_name=None, amount=None, currency=None, receipt_number=None, paid_date=None, **kwargs):
+def record_injaz_payment(clearance_step_name=None, amount=None, currency=None, receipt_number=None, paid_date=None, payment_status=None, **kwargs):
 	"""Mark the current (Active) Injaz attempt Paid, recording amount / currency / receipt. This is
-	what clears the taeshir_injaz_payment_reminder for this attempt."""
+	what clears the taeshir_injaz_payment_reminder for this attempt.
+
+	Pass payment_status="Unpaid" to correct a mistaken Paid confirmation (2026-09-12) -- e.g.
+	someone clicked "Paid" with nothing actually paid yet. Deliberately distinct from
+	forfeit_injaz_and_restart: that treats the fee as genuinely lost and opens a brand new attempt;
+	this is a plain data correction, same attempt, no money actually changed hands."""
 	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
 	step = _require_taeshir_step(clearance_step_name)
+	if payment_status and payment_status not in ("Unpaid", "Paid"):
+		frappe.throw(f"Invalid payment status '{payment_status}'.", frappe.ValidationError)
 
 	attempt = _get_active_injaz_attempt(step)
 	if attempt is None or attempt.outcome != "Active":
 		attempt = step.append("injaz_attempts", {"outcome": "Active"})
-	attempt.payment_status = "Paid"
-	attempt.paid_date = paid_date or today()
+	attempt.payment_status = payment_status or "Paid"
+	attempt.paid_date = (paid_date or today()) if attempt.payment_status == "Paid" else None
 	if amount is not None:
 		attempt.injaz_amount = amount
 	if currency:
@@ -664,7 +708,11 @@ def record_injaz_payment(clearance_step_name=None, amount=None, currency=None, r
 	if receipt_number:
 		attempt.receipt_number = receipt_number
 	step.save(ignore_permissions=True)
-	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Injaz paid: {amount or '-'} {currency or ''} (receipt {receipt_number or '-'})")
+	log_action(
+		"Clearance Step",
+		step.name,
+		f"[{step.title or step.name}] Injaz {attempt.payment_status}: {amount if amount is not None else (attempt.injaz_amount or '-')} {currency or attempt.injaz_currency or ''} (receipt {receipt_number or attempt.receipt_number or '-'})",
+	)
 	return step.as_dict()
 
 
