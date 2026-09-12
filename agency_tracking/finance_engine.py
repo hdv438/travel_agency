@@ -251,6 +251,27 @@ def list_owed_commissions_by_currency(contractor_name, destination_country):
 	return grouped
 
 
+def _unpaid_item_names_from_open_batches(contractor_name, currency):
+	"""Every still-Pending Commission Batch Item sitting in one of this contractor's other open
+	batches (status Sent / Partially Settled) in the same currency -- the exact same pool the
+	invoice PDF's own print-only "previous unpaid" line already sums for display (see
+	render_batch_invoice_pdf). Used by create_batch_request's include_unpaid_from_previous flag
+	(2026-09-12) to actually fold that amount into a NEW batch as real, trackable items, instead
+	of just a cosmetic number on the printed invoice."""
+	open_batch_names = frappe.get_all(
+		"Commission Batch Request",
+		filters={"contractor": contractor_name, "currency": currency, "status": ["in", ["Sent", "Partially Settled"]]},
+		pluck="name",
+	)
+	if not open_batch_names:
+		return []
+	return frappe.get_all(
+		"Commission Batch Item",
+		filters={"parent": ["in", open_batch_names], "status": "Pending"},
+		pluck="name",
+	)
+
+
 def _original_batch_for(transaction_name):
 	"""If this commission was previously carried out of an earlier batch (its old item row was
 	marked Released), return that earlier batch for trace-back. None for a first-time batching."""
@@ -318,11 +339,20 @@ def _lock_and_verify_unclaimed(transaction_names):
 
 
 def create_batch_request(
-	contractor_name, destination_country, transaction_names=None, requested_advance_amount=None, currency=None
+	contractor_name, destination_country, transaction_names=None, requested_advance_amount=None, currency=None,
+	include_unpaid_from_previous=False,
 ):
 	"""currency narrows the owed pool when transaction_names isn't given explicitly -- required
 	whenever a contractor+country has owed commissions in more than one currency (see
-	list_owed_commissions_by_currency), since a batch/invoice is always single-currency."""
+	list_owed_commissions_by_currency), since a batch/invoice is always single-currency.
+
+	include_unpaid_from_previous (2026-09-12, "include unpaid from previous" action): also folds
+	in any still-Pending items sitting in this contractor's other open batches (Sent/Partially
+	Settled) in the same currency -- the exact pool the invoice PDF's own print-only "previous
+	unpaid" line already sums for display, but actually made part of THIS batch's real, per-item-
+	trackable total instead of just a cosmetic number on the printout. Releases those items from
+	their old batch first (same mechanism as release_unpaid_items, called manually), so they
+	genuinely move, not just get counted twice."""
 	if transaction_names is None:
 		owed = list_owed_commissions(contractor_name, destination_country, currency=currency)
 		if not currency:
@@ -334,6 +364,22 @@ def create_batch_request(
 					frappe.ValidationError,
 				)
 		transaction_names = [row["name"] for row in owed]
+
+	if include_unpaid_from_previous:
+		carry_currency = currency or _single_currency_of(transaction_names)
+		if not carry_currency:
+			frappe.throw(
+				"currency is required to include unpaid items from previous batches.",
+				frappe.ValidationError,
+			)
+		carried_item_names = _unpaid_item_names_from_open_batches(contractor_name, carry_currency)
+		if carried_item_names:
+			carried_txn_names = frappe.get_all(
+				"Commission Batch Item", filters={"name": ["in", carried_item_names]}, pluck="transaction"
+			)
+			release_unpaid_items(carried_item_names)
+			transaction_names = list(dict.fromkeys(list(transaction_names) + carried_txn_names))
+			currency = carry_currency
 
 	if not transaction_names:
 		existing = frappe.db.get_value(

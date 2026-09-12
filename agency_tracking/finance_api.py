@@ -308,6 +308,7 @@ def create_commission_batch(
 	transaction_names=None,
 	requested_advance_amount=None,
 	currency=None,
+	include_unpaid_from_previous=None,
 	**kwargs,
 ):
 	"""Manual batching path (Part D: "both paths converge on one create_batch_request()
@@ -316,6 +317,12 @@ def create_commission_batch(
 	contractor/country, which can include items carried over from prior batches via
 	release_unpaid_items). requested_advance_amount records an up-front "pay this ASAP" ask, in
 	the batch's currency.
+
+	include_unpaid_from_previous (2026-09-12, "include unpaid from previous" button): when true,
+	also folds in any still-unpaid items from this contractor's other open batches (Sent/Partially
+	Settled) in the same currency, so this new batch's own total genuinely includes them --
+	trackable per item afterward via settle_batch_items, same as any other item. Requires currency
+	to be known (pass it explicitly, or it's derived from transaction_names when given).
 
 	A batch is always single-currency (it's what gets invoiced to one agency in one currency).
 	If transaction_names is omitted and the owed pool spans more than one currency, pass currency
@@ -332,7 +339,11 @@ def create_commission_batch(
 	if isinstance(transaction_names, str):
 		transaction_names = frappe.parse_json(transaction_names)
 	requested_advance_amount = requested_advance_amount if requested_advance_amount is not None else kwargs.get("requested_advance")
-	batch = create_batch_request(contractor, destination_country, transaction_names, requested_advance_amount, currency)
+	include_unpaid_from_previous = include_unpaid_from_previous in (1, "1", True, "true", "True")
+	batch = create_batch_request(
+		contractor, destination_country, transaction_names, requested_advance_amount, currency,
+		include_unpaid_from_previous=include_unpaid_from_previous,
+	)
 	return batch.as_dict()
 
 

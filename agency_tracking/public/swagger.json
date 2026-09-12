@@ -2890,7 +2890,7 @@
           "Finance"
         ],
         "summary": "Batch a contractor's owed commissions for settlement",
-        "description": "",
+        "description": "Batches a contractor's owed commissions (one currency per batch) into a new Commission Batch Request. transaction_names selects which owed commissions to include; omit it to batch everything currently owed for the contractor/country (pass currency too if that pool spans more than one). include_unpaid_from_previous (2026-09-12, \"include unpaid from previous\") additionally folds in any still-unpaid items sitting in this contractor's other open batches (Sent/Partially Settled) in the same currency, releasing them from their old batch and making them real, per-item-trackable line items on this new one -- not just a cosmetic number on the printed invoice.",
         "x-roles": [
           "Finance Manager",
           "Admin"
@@ -2925,6 +2925,20 @@
             "type": "number",
             "required": false,
             "description": "Up-front ASAP ask recorded on the batch (Birr), separate from advance received"
+          },
+          {
+            "name": "currency",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Required if transaction_names is omitted and the owed pool spans multiple currencies, or if include_unpaid_from_previous is used without transaction_names covering exactly one currency."
+          },
+          {
+            "name": "include_unpaid_from_previous",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "description": "Also carries over still-unpaid items from this contractor's other open (Sent/Partially Settled) batches in the same currency into this new batch."
           }
         ],
         "responses": {
