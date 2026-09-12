@@ -442,9 +442,65 @@ def get_operations_summary(from_date=None, to_date=None, **kwargs):
 	}
 
 
+def _agency_display_name():
+	name = frappe.db.get_single_value("Agency Tracking Settings", "agency_name")
+	return name or "Agency Tracking"
+
+
+def _xlsx_formats(workbook):
+	"""Shared style set for every .xlsx export in this module (2026-09-12) -- one place so every
+	report looks like it came from the same system, not a bare data dump. Money columns use
+	'#,##0.00' (thousands-separated, 2 decimals) and dates are written as real date VALUES with a
+	'yyyy-mm-dd' number format, not plain text -- writing a date as a string is exactly what made
+	the CSV fallback below get auto-mangled into "########" when opened in Excel/LibreOffice (the
+	app guesses it's a date, reformats it, and the default column width is too narrow for its own
+	guess)."""
+	return {
+		"title": workbook.add_format({"bold": True, "font_size": 14, "font_color": "#1E3A8A"}),
+		"subtitle": workbook.add_format({"italic": True, "font_color": "#555555"}),
+		"header": workbook.add_format({
+			"bold": True, "bg_color": "#1E3A8A", "font_color": "#FFFFFF", "border": 1,
+			"align": "center", "valign": "vcenter", "text_wrap": True,
+		}),
+		"cell": workbook.add_format({"border": 1, "valign": "vcenter"}),
+		"cell_alt": workbook.add_format({"border": 1, "valign": "vcenter", "bg_color": "#F3F6FB"}),
+		"num": workbook.add_format({"border": 1, "valign": "vcenter", "num_format": "#,##0.00"}),
+		"num_alt": workbook.add_format({"border": 1, "valign": "vcenter", "num_format": "#,##0.00", "bg_color": "#F3F6FB"}),
+		"date": workbook.add_format({"border": 1, "valign": "vcenter", "num_format": "yyyy-mm-dd"}),
+		"date_alt": workbook.add_format({"border": 1, "valign": "vcenter", "num_format": "yyyy-mm-dd", "bg_color": "#F3F6FB"}),
+	}
+
+
+def _write_report_header(worksheet, fmt, title, subtitle, n_cols):
+	worksheet.merge_range(0, 0, 0, n_cols - 1, title, fmt["title"])
+	worksheet.merge_range(1, 0, 1, n_cols - 1, subtitle, fmt["subtitle"])
+
+
+def _write_rows(worksheet, fmt, start_row, rows, columns):
+	"""columns: list of (getter(row) -> value, kind) where kind is 'text'/'num'/'date'."""
+	for r_idx, r in enumerate(rows):
+		row = start_row + r_idx
+		alt = bool(r_idx % 2)
+		for col, (getter, kind) in enumerate(columns):
+			value = getter(r)
+			if kind == "num":
+				worksheet.write_number(row, col, float(value or 0), fmt["num_alt"] if alt else fmt["num"])
+			elif kind == "date":
+				if value:
+					worksheet.write_datetime(row, col, frappe.utils.get_datetime(value), fmt["date_alt"] if alt else fmt["date"])
+				else:
+					worksheet.write_blank(row, col, None, fmt["date_alt"] if alt else fmt["date"])
+			else:
+				worksheet.write(row, col, value or "", fmt["cell_alt"] if alt else fmt["cell"])
+
+
 @frappe.whitelist()
 def export_commissions_xlsx(contractor=None, destination_country=None, from_date=None, to_date=None):
-	"""Generates and streams binary .xlsx (or CSV fallback) of unpaid / all commission records."""
+	"""Generates and streams a branded .xlsx of Commission-type Applicant Transactions. CSV
+	fallback only if xlsxwriter is somehow missing at runtime despite being a declared dependency
+	(pyproject.toml) -- that fallback now logs an error instead of silently degrading, since a
+	silent CSV fallback with no formatting at all was the root cause of "the excel doesn't look
+	right"/"" the date is unreadable" reports (2026-09-12)."""
 	_require_management()
 
 	filters = {"transaction_type": "Commission"}
@@ -464,46 +520,67 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 		order_by="creation desc"
 	)
 
-	# Try xlsxwriter first
 	try:
 		import io
 		import xlsxwriter
 
 		output = io.BytesIO()
-		workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+		workbook = xlsxwriter.Workbook(output, {"in_memory": True})
 		worksheet = workbook.add_worksheet("Commissions")
-
-		header_format = workbook.add_format({'bold': True, 'bg_color': '#1E3A8A', 'font_color': '#FFFFFF', 'border': 1})
-		cell_format = workbook.add_format({'border': 1})
-		num_format = workbook.add_format({'border': 1, 'num_format': '#,##0.00'})
+		fmt = _xlsx_formats(workbook)
 
 		headers = ["Transaction ID", "Placement", "Applicant", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date"]
+		_write_report_header(
+			worksheet, fmt, f"{_agency_display_name()} — Commissions Report",
+			f"Generated {frappe.utils.today()}" + (f"  |  {from_date} to {to_date}" if from_date and to_date else "") + f"  |  {len(rows)} record(s)",
+			len(headers),
+		)
+		header_row = 3
 		for col, h in enumerate(headers):
-			worksheet.write(0, col, h, header_format)
-			worksheet.set_column(col, col, 18)
+			worksheet.write(header_row, col, h, fmt["header"])
+		worksheet.set_column(0, 0, 16)
+		worksheet.set_column(1, 2, 16)
+		worksheet.set_column(3, 3, 14)
+		worksheet.set_column(4, 4, 16)
+		worksheet.set_column(5, 5, 10)
+		worksheet.set_column(6, 6, 16)
+		worksheet.set_column(7, 7, 12)
+		worksheet.set_column(8, 8, 14)
 
-		for r_idx, r in enumerate(rows, start=1):
-			worksheet.write(r_idx, 0, r.name, cell_format)
-			worksheet.write(r_idx, 1, r.placement or "", cell_format)
-			worksheet.write(r_idx, 2, r.applicant or "", cell_format)
-			worksheet.write(r_idx, 3, r.transaction_type, cell_format)
-			worksheet.write(r_idx, 4, float(r.amount_original or 0), num_format)
-			worksheet.write(r_idx, 5, r.currency_original or "", cell_format)
-			worksheet.write(r_idx, 6, float(r.amount_birr or 0), num_format)
-			worksheet.write(r_idx, 7, r.status, cell_format)
-			worksheet.write(r_idx, 8, str(r.creation)[:10], cell_format)
+		columns = [
+			(lambda r: r.name, "text"),
+			(lambda r: r.placement, "text"),
+			(lambda r: r.applicant, "text"),
+			(lambda r: r.transaction_type, "text"),
+			(lambda r: r.amount_original, "num"),
+			(lambda r: r.currency_original, "text"),
+			(lambda r: r.amount_birr, "num"),
+			(lambda r: r.status, "text"),
+			(lambda r: r.creation, "date"),
+		]
+		_write_rows(worksheet, fmt, header_row + 1, rows, columns)
+
+		last_row = header_row + len(rows)
+		if rows:
+			worksheet.autofilter(header_row, 0, last_row, len(headers) - 1)
+		worksheet.freeze_panes(header_row + 1, 0)
 
 		workbook.close()
 		output.seek(0)
 
-		frappe.response['filename'] = f"commissions_report_{frappe.utils.today()}.xlsx"
-		frappe.response['filecontent'] = output.getvalue()
-		frappe.response['type'] = 'download'
+		frappe.response["filename"] = f"commissions_report_{frappe.utils.today()}.xlsx"
+		frappe.response["filecontent"] = output.getvalue()
+		frappe.response["type"] = "download"
 		return
 	except ImportError:
-		pass
+		frappe.log_error(
+			title="export_commissions_xlsx: xlsxwriter missing",
+			message="xlsxwriter is a declared dependency (pyproject.toml) but isn't importable in "
+			"this environment -- falling back to an unformatted CSV. Run bench pip install / "
+			"reinstall requirements on this site.",
+		)
 
-	# CSV fallback
+	# CSV fallback (last resort only)
 	import csv
 	import io
 	output = io.StringIO()
@@ -512,7 +589,108 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 	for r in rows:
 		writer.writerow([r.name, r.placement or "", r.applicant or "", r.transaction_type, r.amount_original or 0, r.currency_original or "", r.amount_birr or 0, r.status, str(r.creation)[:10]])
 
-	frappe.response['filename'] = f"commissions_report_{frappe.utils.today()}.csv"
-	frappe.response['filecontent'] = output.getvalue()
-	frappe.response['type'] = 'download'
+	frappe.response["filename"] = f"commissions_report_{frappe.utils.today()}.csv"
+	frappe.response["filecontent"] = output.getvalue()
+	frappe.response["type"] = "download"
+
+
+@frappe.whitelist()
+def export_transactions_xlsx(status=None, transaction_type=None, placement=None, applicant=None, from_date=None, to_date=None, **kwargs):
+	"""New (2026-09-12): a full-fidelity .xlsx export of Applicant Transactions across every type
+	(Expense/Income/Commission) and status, not just Commission-type rows -- same filters and
+	field set as finance_api.list_transactions (the call behind the Pending Financial Approvals
+	Queue and similar views), so this export can genuinely match whatever that screen is showing,
+	unlike export_commissions_xlsx above which is deliberately Commission-only. Same branded
+	formatting (comma-separated money, real dates, frozen header, autofilter)."""
+	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	filters = {}
+	status = status or kwargs.get("transaction_status")
+	if status:
+		filters["status"] = status
+	if transaction_type:
+		filters["transaction_type"] = transaction_type
+	if placement:
+		filters["placement"] = placement
+	if applicant:
+		filters["applicant"] = applicant
+	if from_date and to_date:
+		filters["creation"] = ["between", [from_date, to_date]]
+	elif from_date:
+		filters["creation"] = [">=", from_date]
+	elif to_date:
+		filters["creation"] = ["<=", to_date]
+
+	rows = frappe.get_all(
+		"Applicant Transaction",
+		filters=filters,
+		fields=[
+			"name", "applicant", "placement", "transaction_type", "status",
+			"amount_original", "currency_original", "amount_birr", "description",
+			"logged_by", "approved_by", "approved_on", "rejection_reason", "creation",
+		],
+		order_by="creation asc",
+		limit_page_length=0,
+	)
+
+	import io
+	import xlsxwriter
+
+	output = io.BytesIO()
+	workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+	worksheet = workbook.add_worksheet("Transactions")
+	fmt = _xlsx_formats(workbook)
+
+	headers = [
+		"Transaction ID", "Applicant", "Placement", "Type", "Status", "Original Amount",
+		"Currency", "ETB Amount", "Description", "Logged By", "Approved By", "Approved On",
+		"Rejection Reason", "Logged At",
+	]
+	subtitle_bits = [f"Generated {frappe.utils.today()}"]
+	if from_date or to_date:
+		subtitle_bits.append(f"{from_date or '...'} to {to_date or '...'}")
+	if status:
+		subtitle_bits.append(f"Status: {status}")
+	if transaction_type:
+		subtitle_bits.append(f"Type: {transaction_type}")
+	subtitle_bits.append(f"{len(rows)} record(s)")
+
+	_write_report_header(worksheet, fmt, f"{_agency_display_name()} — Transactions Report", "  |  ".join(subtitle_bits), len(headers))
+	header_row = 3
+	for col, h in enumerate(headers):
+		worksheet.write(header_row, col, h, fmt["header"])
+	widths = [16, 16, 14, 12, 12, 16, 10, 16, 26, 20, 20, 14, 22, 14]
+	for col, w in enumerate(widths):
+		worksheet.set_column(col, col, w)
+
+	columns = [
+		(lambda r: r.name, "text"),
+		(lambda r: r.applicant, "text"),
+		(lambda r: r.placement, "text"),
+		(lambda r: r.transaction_type, "text"),
+		(lambda r: r.status, "text"),
+		(lambda r: r.amount_original, "num"),
+		(lambda r: r.currency_original, "text"),
+		(lambda r: r.amount_birr, "num"),
+		(lambda r: r.description, "text"),
+		(lambda r: r.logged_by, "text"),
+		(lambda r: r.approved_by, "text"),
+		(lambda r: r.approved_on, "date"),
+		(lambda r: r.rejection_reason, "text"),
+		(lambda r: r.creation, "date"),
+	]
+	_write_rows(worksheet, fmt, header_row + 1, rows, columns)
+
+	last_row = header_row + len(rows)
+	if rows:
+		worksheet.autofilter(header_row, 0, last_row, len(headers) - 1)
+	worksheet.freeze_panes(header_row + 1, 0)
+
+	workbook.close()
+	output.seek(0)
+
+	frappe.response["filename"] = f"transactions_report_{frappe.utils.today()}.xlsx"
+	frappe.response["filecontent"] = output.getvalue()
+	frappe.response["type"] = "download"
 

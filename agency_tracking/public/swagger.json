@@ -4915,7 +4915,7 @@
           "Finance"
         ],
         "summary": "Export commission records as a binary .xlsx (CSV fallback)",
-        "description": "Streams the file directly in the response (frappe.response['filecontent']), not a JSON body.",
+        "description": "Generates a branded .xlsx (title banner with agency name, navy header row, comma-formatted money columns, real yyyy-mm-dd date values, frozen header, autofilter) of Commission-type Applicant Transactions only. CSV fallback only if xlsxwriter is somehow missing at runtime (it's a declared dependency as of 2026-09-12; a prior version silently fell back to an unformatted CSV whenever xlsxwriter wasn't installed, which is what caused the un-styled output / unreadable date column reported by the frontend team).",
         "x-roles": [
           "Manager",
           "Admin"
@@ -4967,6 +4967,79 @@
           },
           "417": {
             "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.report_api.export_transactions_xlsx": {
+      "post": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Export the full Applicant Transaction list to .xlsx",
+        "description": "New (2026-09-12). Finance Manager/Admin/System Manager. Same filters and field set as finance_api.list_transactions (the call behind the Pending Financial Approvals Queue and similar views) -- unlike export_commissions_xlsx, this covers every transaction_type (Expense/Income/Commission) and status, with description/logged_by/approved_by/approved_on/rejection_reason included. Same branded formatting as export_commissions_xlsx.",
+        "x-roles": [
+          "Finance Manager",
+          "Admin",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "e.g. 'Pending', 'Approved', 'Rejected', 'Voided'."
+          },
+          {
+            "name": "transaction_type",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "e.g. 'Expense', 'Income', 'Commission'."
+          },
+          {
+            "name": "placement",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "applicant",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "from_date",
+            "in": "formData",
+            "type": "string",
+            "format": "date",
+            "required": false
+          },
+          {
+            "name": "to_date",
+            "in": "formData",
+            "type": "string",
+            "format": "date",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binary .xlsx file download"
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
           }
         },
         "security": [
