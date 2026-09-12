@@ -58,9 +58,10 @@ class CommissionBatchRequest(Document):
 
 		2026-09-07: advance_amount_original is NOT part of "accounted" -- an advance is a loan the
 		agency requests ahead of time, not a payment against this batch's own obligation, so it no
-		longer offsets balance_due or counts toward Settled/Partially Settled. It's still recorded
-		on the batch (record_batch_advance) purely as a reference/history field, tracked but never
-		netted against what's owed here.
+		longer offsets balance_due or counts toward Settled/Partially Settled. (2026-09-12:
+		record_batch_advance, the endpoint that used to set this field, was removed as unused --
+		the field itself stays, matching requested_advance_amount's own product decision that
+		Advance is just a number on the invoice for now, nothing more.)
 
 		The settlement mechanisms that DO feed this one balance (per-item Paid marks and one-or-more
 		write-offs) can't over-credit each other. Settled once accounted covers the obligation; any

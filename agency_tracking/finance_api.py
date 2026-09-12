@@ -4,7 +4,7 @@
 # Part F: module-scoped whitelisted functions, no raw /api/resource/* exposure.
 
 import frappe
-from frappe.utils import flt, now, today
+from frappe.utils import now, today
 
 from agency_tracking.finance_engine import (
 	accrue_commission,
@@ -480,46 +480,6 @@ def settle_batch(batch_name=None, settlement_reference=None, **kwargs):
 	if not settlement_reference:
 		frappe.throw("settlement_reference is required.", frappe.ValidationError)
 	return settle_batch_request(batch_name, settlement_reference).as_dict()
-
-
-@frappe.whitelist()
-def record_batch_advance(batch_name=None, advance_amount=None, advance_reference=None, **kwargs):
-	"""Record an advance the agency requested ahead of time against a commission batch --
-	2026-09-07: this is a loan-style ask, not a payment against the batch's own obligation, so it
-	is NOT reconciled against total_amount_original / paid / write-offs (see
-	commission_batch_request._apply_settlement_math) and can't flip the batch toward Settled by
-	itself. advance_amount is in the batch's own currency (batch.currency), same denomination as
-	the invoice. Sets advance_amount_original (+ reference and received-on date); a Birr mirror is
-	derived here (at today's FX rate) for internal accounting only. Full settlement still goes
-	through settle_batch / settle_batch_items."""
-	if not ({"Finance Manager", "Admin"} & set(frappe.get_roles())):
-		frappe.throw("Not permitted.", frappe.PermissionError)
-	batch_name = batch_name or kwargs.get("batch") or kwargs.get("name")
-	advance_amount = advance_amount if advance_amount is not None else kwargs.get("amount")
-	advance_reference = advance_reference or kwargs.get("reference")
-	if not batch_name or not frappe.db.exists("Commission Batch Request", batch_name):
-		frappe.throw("A valid batch_name is required.", frappe.ValidationError)
-	if advance_amount is None:
-		frappe.throw("advance_amount is required.", frappe.ValidationError)
-	amount = flt(advance_amount)
-	if amount <= 0:
-		frappe.throw("advance_amount must be greater than zero.", frappe.ValidationError)
-
-	batch = frappe.get_doc("Commission Batch Request", batch_name)
-	fx_rate, _ = _get_fx_rate(batch.currency)
-	batch.advance_amount_original = amount
-	batch.advance_amount = round(flt(amount) * flt(fx_rate), 2)
-	if advance_reference:
-		batch.advance_reference = advance_reference
-	batch.advance_received_on = today()
-	batch.save(ignore_permissions=True)
-	log_action(
-		"Commission Batch Request",
-		batch.name,
-		f"[{batch.title or batch.name}] Advance received: {amount} {batch.currency}"
-		+ (f" (ref {advance_reference})" if advance_reference else ""),
-	)
-	return batch.as_dict()
 
 
 @frappe.whitelist()

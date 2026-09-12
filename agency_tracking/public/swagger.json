@@ -6273,67 +6273,6 @@
         ]
       }
     },
-    "/api/method/agency_tracking.finance_api.record_batch_advance": {
-      "post": {
-        "tags": [
-          "Finance"
-        ],
-        "summary": "Record a partial/advance payment on a commission batch",
-        "description": "Records a partial/advance payment received from a foreign agency against a commission batch when they remit less than the full requested total. Sets advance_amount (+ optional reference and received-on date); the controller recomputes balance_due_birr and flips an open batch to Partially Settled. Full settlement still goes through settle_batch / settle_batch_items.",
-        "x-roles": [
-          "Finance Manager",
-          "Admin"
-        ],
-        "consumes": [
-          "application/x-www-form-urlencoded",
-          "application/json"
-        ],
-        "parameters": [
-          {
-            "name": "batch_name",
-            "in": "formData",
-            "type": "string",
-            "required": true
-          },
-          {
-            "name": "advance_amount",
-            "in": "formData",
-            "type": "number",
-            "required": true
-          },
-          {
-            "name": "advance_reference",
-            "in": "formData",
-            "type": "string",
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "message": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Not permitted (role/permission check failed)"
-          },
-          "417": {
-            "description": "Validation error (business rule violated)"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
     "/api/method/agency_tracking.placement_api.update_placement_parsed_fields": {
       "post": {
         "tags": [
