@@ -464,10 +464,19 @@ def _resolve_applicant_and_agency(rows):
 
 	applicant_names = {r.get("applicant") for r in rows if r.get("applicant")}
 	applicant_names |= {p.applicant for p in placement_map.values() if p.applicant}
-	applicant_full_name = {
-		a.name: a.full_name
-		for a in frappe.get_all("Applicant", filters={"name": ["in", list(applicant_names) or [""]]}, fields=["name", "full_name"])
-	}
+	applicant_full_name = {}
+	for a in frappe.get_all(
+		"Applicant", filters={"name": ["in", list(applicant_names) or [""]]},
+		fields=["name", "full_name", "first_name", "middle_name", "last_name"],
+	):
+		# 2026-09-12: build the display name from the granular parts (first/middle/last -- in
+		# this app's Ethiopian-naming convention, middle_name is the father's name and last_name
+		# the grandfather's) rather than trusting the stored full_name field alone. full_name is
+		# only auto-derived from these parts WHEN IT'S BLANK (Applicant.set_full_name) -- if
+		# middle_name/last_name get filled in or corrected later, full_name is never re-synced,
+		# so it can silently go stale and drop the grandfather's name a report must show.
+		parts = " ".join(filter(None, [a.first_name, a.middle_name, a.last_name]))
+		applicant_full_name[a.name] = parts or a.full_name or ""
 
 	contractor_names = {p.contractor for p in placement_map.values() if p.contractor}
 	contractor_display_name = {
