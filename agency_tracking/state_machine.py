@@ -427,7 +427,22 @@ def ticket_recorded_gate(placement):
 	return "no ticket_number recorded yet. Call placement_api.record_ticket_details first."
 
 
-STAGE_GATES[("Stamped", "Ticketed")] = ticket_recorded_gate
+# 2026-09-12: a mandatory Clearance Step can now be reopened after the fact
+# (clearance_api.reopen_clearance_step) when its own terminal outcome was wrong, not just its
+# data -- e.g. an LMIS officer un-Issuing a step they marked complete by mistake. Nothing
+# previously re-checked clearance completeness once a Placement had already auto-advanced past
+# Processing, so a reopened step (silently back to Pending/In Progress) would NOT stop Ticketing
+# from proceeding on a corridor that's no longer actually fully cleared. Chained onto
+# ticket_recorded_gate rather than replacing it, mirroring departure_gate's own two-checks
+# pattern below.
+def stamped_to_ticketed_gate(placement):
+	ticket = ticket_recorded_gate(placement)
+	if ticket is not True:
+		return ticket
+	return all_mandatory_clearance_steps_complete(placement)
+
+
+STAGE_GATES[("Stamped", "Ticketed")] = stamped_to_ticketed_gate
 
 
 # --- Free-replacement window gate (Part A.4 / Step 10) ---

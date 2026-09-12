@@ -84,7 +84,7 @@
     },
     {
       "name": "Reports",
-      "description": "Management/Admin visibility — daily/staff/financial/aging/operations reports"
+      "description": "Management/Admin visibility \u2014 daily/staff/financial/aging/operations reports"
     },
     {
       "name": "Clearance Steps",
@@ -1618,7 +1618,7 @@
           "Clearance Steps"
         ],
         "summary": "Mark a Clearance Step complete/Issued",
-        "description": "Not for Embassy steps. LMIS (both countries) completes to 'Issued'; everything else (Taeshir, Telesign) completes to the generic 'Complete'. Blocked (417) once the step is already terminal (Issued/Complete/Stamped/Rejected) or its parent Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-3).",
+        "description": "Not for Embassy steps. LMIS (both countries) completes to 'Issued'; everything else (Taeshir, Telesign) completes to the generic 'Complete'. Legal from Pending or In Progress (a fresh completion); re-calling it on an already-terminal step is treated as a correction (reference_no/amount/date_completed only, status/completed_by are refreshed but the outcome itself doesn't change) -- any other from-status is rejected (417). Blocked entirely once the parent Placement is already Departed/Cancelled.",
         "x-roles": [
           "Manager/Admin",
           "The ToDo-assigned officer (Clearance Officer/Ticketer)",
@@ -1646,6 +1646,275 @@
             "in": "formData",
             "type": "number",
             "required": false
+          },
+          {
+            "name": "date_completed",
+            "in": "formData",
+            "type": "string",
+            "format": "date",
+            "required": false,
+            "description": "Only applied when explicitly passed. Defaults to today on a fresh completion; left untouched on a correction that doesn't pass it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "$ref": "#/definitions/ClearanceStepDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.clearance_api.reopen_clearance_step": {
+      "post": {
+        "tags": [
+          "Clearance Steps"
+        ],
+        "summary": "Reopen a Clearance Step's own terminal outcome",
+        "description": "New (2026-09-12). Manager/Admin/System Manager only. Reverses a step's own terminal outcome (Issued/Complete/Stamped/Rejected) back to Pending/In Progress (or Submitted, Embassy only) when the determination itself was wrong, not just its data -- complete_clearance_step's own correction path already covers a wrong reference number/amount/date on an otherwise-correct outcome. Deliberately scoped to only this step: does not cascade into anything downstream (Embassy work already done on the old result, or a Placement that already auto-advanced to Stamped) -- the Stamped->Ticketed gate separately re-checks that every mandatory step is still complete before Ticketing, so a reopened step blocks progress until it's re-completed rather than being silently ignored.",
+        "x-roles": [
+          "Manager/Admin/System Manager"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "clearance_step_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "reason",
+            "in": "formData",
+            "type": "string",
+            "required": true,
+            "description": "Mandatory written reason, recorded on the audit trail."
+          },
+          {
+            "name": "target_status",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Defaults to 'In Progress'. Must be 'Pending' or 'In Progress' (also 'Submitted' for an Embassy step_type)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "$ref": "#/definitions/ClearanceStepDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.clearance_api.record_police_ashara": {
+      "post": {
+        "tags": [
+          "Clearance Steps"
+        ],
+        "summary": "Record a Kuwait LMIS step's Police Ashara sub-check",
+        "description": "New (2026-09-12). Kuwait LMIS step_type only. Records the appointment/status/payment/remark for the Police Ashara sub-check, mirroring record_wakala_payment's Embassy-only Wakala fields. Replaces the previous only-way-to-change-it: a raw desk-form field edit with no role gate beyond blanket Clearance Step write access, no validation, and no audit trail.",
+        "x-roles": [
+          "Manager/Admin",
+          "The ToDo-assigned officer",
+          "Kuwait LMIS role"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "clearance_step_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "police_ashara_status",
+            "in": "formData",
+            "type": "string",
+            "enum": [
+              "Pending",
+              "Scheduled",
+              "Completed",
+              "Failed"
+            ],
+            "required": false
+          },
+          {
+            "name": "police_ashara_payment_status",
+            "in": "formData",
+            "type": "string",
+            "enum": [
+              "Not Applicable",
+              "Pending",
+              "Paid"
+            ],
+            "required": false
+          },
+          {
+            "name": "police_ashara_amount",
+            "in": "formData",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "police_ashara_appointment_date",
+            "in": "formData",
+            "type": "string",
+            "format": "date",
+            "required": false
+          },
+          {
+            "name": "police_ashara_remark",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Required if police_ashara_status is set to 'Failed'."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "$ref": "#/definitions/ClearanceStepDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.clearance_api.record_other_payment": {
+      "post": {
+        "tags": [
+          "Clearance Steps"
+        ],
+        "summary": "Record or correct a miscellaneous payment on a Clearance Step",
+        "description": "New (2026-09-12). Adds a new row (or, with payment_row_name, corrects an existing one) in a Clearance Step's generic \"Other Payments\" table -- any fee not already covered by a dedicated field (Wakala, Police Ashara, Injaz), e.g. an insurance premium. Works for any step_type. Replaces the previous only-way-to-change-it: a raw desk-form child-table edit with no role gate beyond blanket Clearance Step write access, no validation, and no audit trail.",
+        "x-roles": [
+          "Manager/Admin",
+          "The ToDo-assigned officer",
+          "Anyone holding the role mapped to this step_type"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "clearance_step_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "payment_type",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Required when recording a new payment (payment_row_name not passed), e.g. 'Insurance'."
+          },
+          {
+            "name": "amount",
+            "in": "formData",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "in": "formData",
+            "type": "string",
+            "enum": [
+              "SAR",
+              "KWD",
+              "USD",
+              "ETB",
+              "AED",
+              "QAR"
+            ],
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "formData",
+            "type": "string",
+            "enum": [
+              "Pending",
+              "Paid"
+            ],
+            "required": false
+          },
+          {
+            "name": "remark",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "receipt_url",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "payment_row_name",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Pass the existing child row's name to correct it instead of appending a new row."
           }
         ],
         "responses": {
@@ -2048,7 +2317,10 @@
             "name": "wakala_status",
             "in": "formData",
             "type": "string",
-            "enum": ["Pending", "Paid"],
+            "enum": [
+              "Pending",
+              "Paid"
+            ],
             "required": false
           },
           {
@@ -4839,7 +5111,7 @@
         "tags": [
           "Reports"
         ],
-        "summary": "CVs created, medicals processed, clearances issued, embassies cleared, tickets booked, departures — for a date range",
+        "summary": "CVs created, medicals processed, clearances issued, embassies cleared, tickets booked, departures \u2014 for a date range",
         "description": "business-workflow-srs.md Part 8's exact list.",
         "x-roles": [
           "Manager",

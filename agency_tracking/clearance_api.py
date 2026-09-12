@@ -89,6 +89,7 @@ def complete_clearance_step(
 	name=None,
 	reference_no=None,
 	amount=None,
+	date_completed=None,
 	**kwargs,
 ):
 	"""Mark a Clearance Step complete/Issued. Not for Embassy steps -- use
@@ -107,8 +108,26 @@ def complete_clearance_step(
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	assert_clearance_step_not_terminal(step)
 
-	step.status = TERMINAL_STATUS_BY_STEP_TYPE.get(step.step_type, DEFAULT_TERMINAL_STATUS)
-	step.date_completed = today()
+	terminal_status = TERMINAL_STATUS_BY_STEP_TYPE.get(step.step_type, DEFAULT_TERMINAL_STATUS)
+	# 2026-09-12: distinguishes a fresh completion from a correction re-save of an already-Issued/
+	# Complete step (allowed since 34fdb49 relaxed the step-terminal lock for data corrections --
+	# but that relaxation also removed the only guard stopping this from firing on any OTHER
+	# status too). A fresh completion is only legal from Pending (an officer who does the work and
+	# marks it done without separately clicking "Start" first) or In Progress; anything else is a
+	# nonsensical call this step type should never actually be in.
+	is_correction = step.status == terminal_status
+	if not is_correction and step.status not in ("Pending", "In Progress"):
+		frappe.throw(f"A '{step.status}' clearance step cannot be completed.", frappe.ValidationError)
+
+	if not step.date_started:
+		step.date_started = today()
+	step.status = terminal_status
+	if date_completed:
+		step.date_completed = date_completed
+	elif not is_correction:
+		step.date_completed = today()
+	# else: correcting other fields without an explicit date_completed -- leave the existing
+	# completion date untouched rather than silently bumping it to today.
 	step.completed_by = frappe.session.user
 	if reference_no:
 		step.reference_no = reference_no
@@ -117,6 +136,12 @@ def complete_clearance_step(
 		step.payment_status = "Paid"
 	step.save(ignore_permissions=True)
 	_close_open_todos(clearance_step_name)
+	log_action(
+		"Clearance Step",
+		step.name,
+		f"[{step.title or step.name}] {'Corrected' if is_correction else terminal_status}"
+		f" (reference {step.reference_no or '-'}, date {step.date_completed or '-'})",
+	)
 	auto_advance_placement_if_ready(step.placement)
 	return step.as_dict()
 
@@ -161,6 +186,7 @@ def start_clearance_step(clearance_step_name=None, step_name=None, name=None, **
 	step.status = "In Progress"
 	step.date_started = today()
 	step.save(ignore_permissions=True)
+	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Started")
 	return step.as_dict()
 
 
@@ -279,6 +305,11 @@ def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 		step.reference_no = reference_no
 	step.save(ignore_permissions=True)
 	_close_open_todos(clearance_step_name)
+	log_action(
+		"Clearance Step",
+		step.name,
+		f"[{step.title or step.name}] {'Corrected' if is_correction else 'Stamped'} (reference {step.reference_no or '-'})",
+	)
 	auto_advance_placement_if_ready(step.placement)
 	return step.as_dict()
 
@@ -302,12 +333,18 @@ def reject_embassy_step(clearance_step_name=None, rejection_remark=None, **kwarg
 	# forgiving-on-data, firm-on-status-direction policy as stamp_embassy_step).
 	if step.status not in ("Submitted", "Rejected"):
 		frappe.throw(f"Documents must be Submitted before they can be Rejected (this step is '{step.status}').", frappe.ValidationError)
+	is_correction = step.status == "Rejected"
 	step.status = "Rejected"
 	step.rejection_remark = rejection_remark
 	step.date_completed = today()
 	step.completed_by = frappe.session.user
 	step.save(ignore_permissions=True)
 	_close_open_todos(clearance_step_name)
+	log_action(
+		"Clearance Step",
+		step.name,
+		f"[{step.title or step.name}] {'Rejection remark corrected' if is_correction else 'Rejected'}: {rejection_remark}",
+	)
 	return step.as_dict()
 
 
@@ -321,9 +358,165 @@ def reassign_clearance_step(clearance_step_name=None, new_officer=None, **kwargs
 		frappe.throw("new_officer is required.", frappe.ValidationError)
 	if not ({"Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
-	assert_clearance_step_not_terminal(frappe.get_doc("Clearance Step", clearance_step_name))
+	step = frappe.get_doc("Clearance Step", clearance_step_name)
+	assert_clearance_step_not_terminal(step)
 	assign_clearance_step(clearance_step_name, new_officer)
+	log_action("Clearance Step", clearance_step_name, f"[{step.title or step.name}] Reassigned to {new_officer}")
 	return {"clearance_step": clearance_step_name, "assigned_to": new_officer}
+
+
+@frappe.whitelist()
+def reopen_clearance_step(clearance_step_name=None, reason=None, target_status=None, **kwargs):
+	"""Manager/Admin/System Manager only. Reverses a step's own terminal OUTCOME (Issued/Complete/
+	Stamped/Rejected) when the determination itself was wrong, not just its data -- e.g. an LMIS
+	officer marked a step Issued by mistake and needs to genuinely undo that, not just correct a
+	reference number (complete_clearance_step's own correction path already covers that case).
+
+	Deliberately scoped to ONLY this step: does not touch, re-check, or cascade into anything
+	downstream that may already have relied on the old (wrong) result -- e.g. Embassy work done on
+	the assumption LMIS was genuinely Issued, or a Placement that already auto-advanced to Stamped.
+	Automatically unwinding those is a much bigger, riskier feature than this one; instead,
+	state_machine's Stamped->Ticketed gate re-checks that every mandatory step is still complete at
+	that point, so reopening one here quietly blocks Ticketing until a human notices and
+	re-completes it -- it doesn't need to reverse the Placement itself."""
+	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
+	if not clearance_step_name:
+		frappe.throw("clearance_step_name is required.", frappe.ValidationError)
+	if not reason:
+		frappe.throw("A reason is required to reopen a clearance step.", frappe.ValidationError)
+	if not ({"Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	step = _load_actionable_step(clearance_step_name)
+	is_embassy = step.step_type in ("Embassy", "Kuwait Embassy")
+	valid_targets = {"Pending", "In Progress", "Submitted"} if is_embassy else {"Pending", "In Progress"}
+	target_status = target_status or "In Progress"
+	if target_status not in valid_targets:
+		frappe.throw(
+			f"'{target_status}' isn't a valid reopen target for a '{step.step_type}' step "
+			f"(expected one of {sorted(valid_targets)}).",
+			frappe.ValidationError,
+		)
+	if step.status == target_status:
+		frappe.throw(f"{step.name} is already '{target_status}'.", frappe.ValidationError)
+
+	previous_status = step.status
+	step.status = target_status
+	step.date_completed = None
+	step.completed_by = None
+	if is_embassy and previous_status == "Rejected":
+		step.rejection_remark = None
+	step.save(ignore_permissions=True)
+	log_action(
+		"Clearance Step",
+		step.name,
+		f"[{step.title or step.name}] Reopened: '{previous_status}' -> '{target_status}' ({reason})",
+	)
+	return step.as_dict()
+
+
+@frappe.whitelist()
+def record_police_ashara(
+	clearance_step_name=None,
+	police_ashara_status=None,
+	police_ashara_payment_status=None,
+	police_ashara_amount=None,
+	police_ashara_appointment_date=None,
+	police_ashara_remark=None,
+	**kwargs,
+):
+	"""Record the Kuwait LMIS step's own Police Ashara sub-check (appointment/status/payment/
+	remark) -- Kuwait LMIS-only, mirrors record_wakala_payment's Embassy-only Wakala fields.
+	Replaces the previous only-way-to-change-it: a raw desk-form field edit with no role gate
+	beyond blanket Clearance Step write access, no validation, and no audit trail."""
+	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
+	step = _load_actionable_step(clearance_step_name, {"Kuwait LMIS"})
+	if not _can_act_on_step(step):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	if police_ashara_status and police_ashara_status not in ("Pending", "Scheduled", "Completed", "Failed"):
+		frappe.throw(f"Invalid Police Ashara status '{police_ashara_status}'.", frappe.ValidationError)
+	if police_ashara_payment_status and police_ashara_payment_status not in ("Not Applicable", "Pending", "Paid"):
+		frappe.throw(f"Invalid Police Ashara payment status '{police_ashara_payment_status}'.", frappe.ValidationError)
+	effective_remark = police_ashara_remark if police_ashara_remark is not None else step.police_ashara_remark
+	if police_ashara_status == "Failed" and not effective_remark:
+		frappe.throw("A remark is required when Police Ashara status is 'Failed'.", frappe.ValidationError)
+	if police_ashara_status:
+		step.police_ashara_status = police_ashara_status
+	if police_ashara_payment_status:
+		step.police_ashara_payment_status = police_ashara_payment_status
+	if police_ashara_amount is not None:
+		step.police_ashara_amount = police_ashara_amount
+	if police_ashara_appointment_date:
+		step.police_ashara_appointment_date = police_ashara_appointment_date
+	if police_ashara_remark is not None:
+		step.police_ashara_remark = police_ashara_remark
+	step.save(ignore_permissions=True)
+	log_action(
+		"Clearance Step",
+		step.name,
+		f"[{step.title or step.name}] Police Ashara {step.police_ashara_status or '-'}: {step.police_ashara_amount or '-'} (payment {step.police_ashara_payment_status or '-'})",
+	)
+	return step.as_dict()
+
+
+@frappe.whitelist()
+def record_other_payment(
+	clearance_step_name=None,
+	payment_type=None,
+	amount=None,
+	currency=None,
+	status=None,
+	remark=None,
+	receipt_url=None,
+	payment_row_name=None,
+	**kwargs,
+):
+	"""Add a new row, or correct an existing one (pass payment_row_name), in a Clearance Step's
+	generic "Other Payments" table -- any miscellaneous fee not already covered by a dedicated
+	field (Wakala, Police Ashara, Injaz), e.g. an insurance premium. Works for any step_type.
+	Replaces the previous only-way-to-change-it: a raw desk-form child-table edit with no role
+	gate beyond blanket Clearance Step write access, no validation, and no audit trail."""
+	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
+	step = _load_actionable_step(clearance_step_name)
+	if not _can_act_on_step(step):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	if currency and currency not in ("SAR", "KWD", "USD", "ETB", "AED", "QAR"):
+		frappe.throw(f"Invalid currency '{currency}'.", frappe.ValidationError)
+	if status and status not in ("Pending", "Paid"):
+		frappe.throw(f"Invalid payment status '{status}'.", frappe.ValidationError)
+
+	is_correction = bool(payment_row_name)
+	row = None
+	if is_correction:
+		row = next((r for r in (step.get("payments") or []) if r.name == payment_row_name), None)
+		if row is None:
+			frappe.throw(f"Payment row {payment_row_name} not found on {step.name}.", frappe.ValidationError)
+	else:
+		if not payment_type:
+			frappe.throw("payment_type is required to record a new payment.", frappe.ValidationError)
+		row = step.append("payments", {})
+
+	if payment_type:
+		row.payment_type = payment_type
+	if amount is not None:
+		row.amount = amount
+	if currency:
+		row.currency = currency
+	if status:
+		row.status = status
+	if remark is not None:
+		row.remark = remark
+	if receipt_url is not None:
+		row.receipt_url = receipt_url
+	step.save(ignore_permissions=True)
+	log_action(
+		"Clearance Step",
+		step.name,
+		f"[{step.title or step.name}] {'Corrected' if is_correction else 'Recorded'} payment: "
+		f"{row.payment_type or '-'} {row.amount or '-'} {row.currency or ''} ({row.status or '-'})",
+	)
+	return step.as_dict()
 
 
 @frappe.whitelist()
