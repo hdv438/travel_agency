@@ -10,7 +10,7 @@ import frappe
 from frappe.utils import today
 from decimal import Decimal
 
-from agency_tracking.state_machine import TRANSITION_SIDE_EFFECTS, log_action
+from agency_tracking.state_machine import TRANSITION_SIDE_EFFECTS, lock_doc_row, log_action
 
 
 # --- FX rates (Part D: "live rate fetched at entry... as_of_date override for backdated
@@ -289,6 +289,34 @@ def _single_currency_of(transaction_names):
 	return currencies.pop() if currencies else None
 
 
+def _lock_and_verify_unclaimed(transaction_names):
+	"""Row-lock exactly the Applicant Transaction rows about to be claimed into a new batch, and
+	re-verify each is still unclaimed (commission_batch_request IS NULL) under that lock.
+	2026-09-12 fix for a real race: two concurrent create_batch_request calls (manual, or two
+	Placements simultaneously tripping _maybe_auto_batch's threshold for the same contractor)
+	could otherwise both read the same still-unclaimed pool before either commits, and both
+	create a batch containing the same commission -- double-invoicing it. A locking read always
+	returns latest-committed data regardless of this transaction's own snapshot, same primitive as
+	lock_applicant_row/lock_doc_row use for the identical class of bug elsewhere in this app."""
+	if not transaction_names:
+		return
+	placeholders = ", ".join(["%s"] * len(transaction_names))
+	still_unclaimed = {
+		row[0]
+		for row in frappe.db.sql(
+			f"SELECT `name` FROM `tabApplicant Transaction` WHERE `name` IN ({placeholders}) "
+			"AND `commission_batch_request` IS NULL FOR UPDATE",
+			tuple(transaction_names),
+		)
+	}
+	already_claimed = set(transaction_names) - still_unclaimed
+	if already_claimed:
+		frappe.throw(
+			f"Already claimed by another batch, not available: {', '.join(sorted(already_claimed))}.",
+			frappe.ValidationError,
+		)
+
+
 def create_batch_request(
 	contractor_name, destination_country, transaction_names=None, requested_advance_amount=None, currency=None
 ):
@@ -328,6 +356,7 @@ def create_batch_request(
 		).insert(ignore_permissions=True)
 		return batch
 
+	_lock_and_verify_unclaimed(transaction_names)
 	batch_currency = _single_currency_of(transaction_names)
 	batch = frappe.get_doc(
 		{
@@ -365,6 +394,13 @@ def apply_batch_write_off(batch_name, write_off_amount, write_off_reason):
 	if amount <= 0:
 		frappe.throw("write_off_amount must be greater than zero.", frappe.ValidationError)
 
+	# 2026-09-12 fix: lock BEFORE reading the batch, not after -- two concurrent write-offs on the
+	# same batch (two tabs, two staff, or a double-click) previously both read the same
+	# pre-write accounted total, both passed the ceiling check below independently, and both
+	# committed, over-crediting the batch past its own total with no error at all. Locking first
+	# means the second call's read happens only after the first has fully committed, so it sees
+	# the first write-off already counted in existing_write_off_original.
+	lock_doc_row("Commission Batch Request", batch_name)
 	batch = frappe.get_doc("Commission Batch Request", batch_name)
 	# Reconcile against everything already accounted for -- per-item payments + every existing
 	# write-off + this new one can't exceed the obligation, else the batch is over-credited

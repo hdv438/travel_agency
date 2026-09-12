@@ -53,6 +53,18 @@ def lock_applicant_row(applicant_name):
 	return rows[0][0] if rows else None
 
 
+def lock_doc_row(doctype, name):
+	"""Generic row-level lock (SELECT ... FOR UPDATE), held until the current request's
+	transaction commits -- same primitive as lock_applicant_row above, generalized (2026-09-12)
+	for any doctype where two concurrent requests could both read-then-write the same row off a
+	stale snapshot. First user: Commission Batch Request write-offs/batch creation, where an
+	unlocked check-then-act could over-credit a batch or double-invoice the same commission into
+	two batches (finance_engine.py). Call this BEFORE any plain read of the same row in the same
+	request -- a locking read always sees latest-committed data and, as the first statement
+	touching this row, fixes the transaction's snapshot for any plain read that follows it."""
+	frappe.db.sql(f"SELECT `name` FROM `tab{doctype}` WHERE `name`=%s FOR UPDATE", name)
+
+
 # Fields that describe *where a record sits in its lifecycle* or *which record it is* -- never
 # something a document parser is allowed to write. Parsing (passport MRZ, contract, visa, injaz)
 # is strictly informational: it may auto-fill data fields and attach the file, but the ONLY

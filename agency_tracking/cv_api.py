@@ -81,11 +81,18 @@ def _cv_context(applicant):
 
 
 def _render_cv_pdf(applicant):
-	"""Renders the AS Agency CV letterhead with fallback to prevent blocking."""
-	try:
-		return render_pdf(CV_TEMPLATE, _cv_context(applicant))
-	except Exception:
-		return b"%PDF-1.4 Mock CV PDF generated for " + (applicant.full_name or applicant.name).encode() + b"\n%%EOF"
+	"""Renders the AS Agency CV letterhead. Raises on failure -- does NOT catch and fake a
+	document (2026-09-12 fix): the previous version silently returned a ~60-byte stub PDF on ANY
+	render failure (missing wkhtmltopdf, a bad photo, a template error), and all three consumers
+	(generate_cv, the sync render_cv_pdf download, and the async "Render CV PDF" background job)
+	treated that stub as a real, successful CV -- an applicant's lifecycle would advance to "CV
+	Generated" with a fake document attached, the sync download would hand a caller ~60 bytes of
+	garbage with a 200 status, and the async job would report "Completed" instead of "Failed".
+	generate_cv's own try/except (below) is what actually implements "a render failure must never
+	block the CV Generated transition" -- faking a document here was never load-bearing for that,
+	it just hid every real failure from staff and from the async job's already-correct Failed/
+	traceback reporting (background_jobs.run_background_job)."""
+	return render_pdf(CV_TEMPLATE, _cv_context(applicant))
 
 
 def _attach_cv_pdf(cv, applicant, pdf_bytes):
@@ -160,7 +167,11 @@ def render_cv_pdf(applicant_name=None, **kwargs):
 	if not frappe.db.exists("Applicant", applicant_name):
 		frappe.throw(f"Applicant {applicant_name} not found.", frappe.DoesNotExistError)
 	applicant = frappe.get_doc("Applicant", applicant_name)
-	pdf_bytes = _render_cv_pdf(applicant)
+	try:
+		pdf_bytes = _render_cv_pdf(applicant)
+	except Exception:
+		frappe.log_error(title="CV PDF generation failed", message=f"Applicant {applicant_name}")
+		frappe.throw("Could not generate the CV PDF. Try again shortly or contact support.", frappe.ValidationError)
 	frappe.response["filename"] = f"CV_{applicant_name}.pdf"
 	frappe.response["filecontent"] = pdf_bytes
 	frappe.response["type"] = "download"
