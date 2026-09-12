@@ -4,7 +4,7 @@
 # Part F: module-scoped whitelisted functions, no raw /api/resource/* exposure.
 
 import frappe
-from frappe.utils import now, today
+from frappe.utils import flt, now, today
 
 from agency_tracking.finance_engine import (
 	accrue_commission,
@@ -343,6 +343,38 @@ def create_commission_batch(
 	batch = create_batch_request(
 		contractor, destination_country, transaction_names, requested_advance_amount, currency,
 		include_unpaid_from_previous=include_unpaid_from_previous,
+	)
+	return batch.as_dict()
+
+
+@frappe.whitelist()
+def update_batch_advance(batch_name=None, requested_advance_amount=None, **kwargs):
+	"""Set or change the advance amount requested on an EXISTING batch (2026-09-12).
+	create_commission_batch only lets requested_advance_amount be set at creation time -- this is
+	the endpoint for adding one afterward, or correcting it. Same deliberately simple model as
+	everywhere else Advance appears in this app: just a number added into the printed invoice
+	total (Batch Total + requested_advance_amount + previous_unpaid_original) -- no reference
+	number, no received-date, no settlement-math linkage (see
+	commission_batch_request._apply_settlement_math). Pass 0 to clear a previously-set advance."""
+	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	batch_name = batch_name or kwargs.get("batch") or kwargs.get("name")
+	if not batch_name or not frappe.db.exists("Commission Batch Request", batch_name):
+		frappe.throw("A valid batch_name is required.", frappe.ValidationError)
+	if requested_advance_amount is None:
+		frappe.throw("requested_advance_amount is required.", frappe.ValidationError)
+	amount = flt(requested_advance_amount)
+	if amount < 0:
+		frappe.throw("requested_advance_amount cannot be negative.", frappe.ValidationError)
+
+	batch = frappe.get_doc("Commission Batch Request", batch_name)
+	previous = batch.requested_advance_amount or 0
+	batch.requested_advance_amount = amount
+	batch.save(ignore_permissions=True)
+	log_action(
+		"Commission Batch Request",
+		batch.name,
+		f"[{batch.title or batch.name}] Requested advance changed: {previous} -> {amount} {batch.currency or ''}".strip(),
 	)
 	return batch.as_dict()
 

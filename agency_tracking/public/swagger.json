@@ -2967,6 +2967,63 @@
         ]
       }
     },
+    "/api/method/agency_tracking.finance_api.update_batch_advance": {
+      "post": {
+        "tags": [
+          "Finance"
+        ],
+        "summary": "Set or change the advance requested on an existing batch",
+        "description": "New (2026-09-12). Finance Manager/Admin/System Manager. create_commission_batch only lets requested_advance_amount be set at creation time -- this is the endpoint for adding one afterward or correcting it. Deliberately simple: just a number added into the printed invoice total (Batch Total + requested_advance_amount + previous unpaid), no reference number, no received-date, no settlement-math linkage. Pass 0 to clear a previously-set advance.",
+        "x-roles": [
+          "Finance Manager",
+          "Admin",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "batch_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "requested_advance_amount",
+            "in": "formData",
+            "type": "number",
+            "required": true,
+            "description": "In the batch's own currency. Pass 0 to clear."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "$ref": "#/definitions/CommissionBatchRequestDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/method/agency_tracking.finance_api.get_fx_rate": {
       "post": {
         "tags": [
