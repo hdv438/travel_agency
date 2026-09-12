@@ -568,10 +568,10 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 		fmt = _xlsx_formats(workbook)
 
 		# 2026-09-12: led with the human-readable identifiers (applicant name, foreign agency),
-		# not internal record IDs (Placement/Applicant link names) -- client-facing, and a raw
-		# "PLM-00016" means nothing to them. Transaction ID kept per explicit request, but moved
-		# to the end as a reference column rather than leading the sheet.
-		headers = ["Applicant", "Foreign Agency", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date", "Transaction ID"]
+		# not internal record IDs -- client-facing, and a raw "PLM-00016" means nothing to them.
+		# Placement and Transaction ID kept per explicit request, but pushed to the very end as
+		# reference columns rather than leading the sheet.
+		headers = ["Applicant", "Foreign Agency", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date", "Transaction ID", "Placement"]
 		_write_report_header(
 			worksheet, fmt, f"{_agency_display_name()} — Commissions Report",
 			f"Generated {frappe.utils.today()}" + (f"  |  {from_date} to {to_date}" if from_date and to_date else "") + f"  |  {len(rows)} record(s)",
@@ -580,7 +580,7 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 		header_row = 3
 		for col, h in enumerate(headers):
 			worksheet.write(header_row, col, h, fmt["header"])
-		widths = [22, 24, 14, 16, 10, 16, 12, 14, 16]
+		widths = [22, 24, 14, 16, 10, 16, 12, 14, 16, 16]
 		for col, w in enumerate(widths):
 			worksheet.set_column(col, col, w)
 
@@ -594,6 +594,7 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 			(lambda r: r.status, "text"),
 			(lambda r: r.creation, "date"),
 			(lambda r: r.name, "text"),
+			(lambda r: r.placement, "text"),
 		]
 		_write_rows(worksheet, fmt, header_row + 1, rows, columns)
 
@@ -622,9 +623,9 @@ def export_commissions_xlsx(contractor=None, destination_country=None, from_date
 	import io
 	output = io.StringIO()
 	writer = csv.writer(output)
-	writer.writerow(["Applicant", "Foreign Agency", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date", "Transaction ID"])
+	writer.writerow(["Applicant", "Foreign Agency", "Type", "Original Amount", "Currency", "ETB Amount", "Status", "Date", "Transaction ID", "Placement"])
 	for r in rows:
-		writer.writerow([r.applicant_full_name or "", r.foreign_agency_name or "", r.transaction_type, r.amount_original or 0, r.currency_original or "", r.amount_birr or 0, r.status, str(r.creation)[:10], r.name])
+		writer.writerow([r.applicant_full_name or "", r.foreign_agency_name or "", r.transaction_type, r.amount_original or 0, r.currency_original or "", r.amount_birr or 0, r.status, str(r.creation)[:10], r.name, r.placement or ""])
 
 	frappe.response["filename"] = f"commissions_report_{frappe.utils.today()}.csv"
 	frappe.response["filecontent"] = output.getvalue()
@@ -681,12 +682,12 @@ def export_transactions_xlsx(status=None, transaction_type=None, placement=None,
 	fmt = _xlsx_formats(workbook)
 
 	# 2026-09-12: same client-facing-name rule as export_commissions_xlsx -- applicant name +
-	# foreign agency name lead the sheet, no raw Placement ID column at all, Transaction ID kept
-	# but pushed to the end as a reference column.
+	# foreign agency name lead the sheet. Placement and Transaction ID kept per explicit request,
+	# pushed to the very end as reference columns.
 	headers = [
 		"Applicant", "Foreign Agency", "Type", "Status", "Original Amount",
 		"Currency", "ETB Amount", "Description", "Logged By", "Approved By", "Approved On",
-		"Rejection Reason", "Logged At", "Transaction ID",
+		"Rejection Reason", "Logged At", "Transaction ID", "Placement",
 	]
 	subtitle_bits = [f"Generated {frappe.utils.today()}"]
 	if from_date or to_date:
@@ -701,7 +702,7 @@ def export_transactions_xlsx(status=None, transaction_type=None, placement=None,
 	header_row = 3
 	for col, h in enumerate(headers):
 		worksheet.write(header_row, col, h, fmt["header"])
-	widths = [22, 24, 12, 12, 16, 10, 16, 26, 20, 20, 14, 22, 14, 16]
+	widths = [22, 24, 12, 12, 16, 10, 16, 26, 20, 20, 14, 22, 14, 16, 16]
 	for col, w in enumerate(widths):
 		worksheet.set_column(col, col, w)
 
@@ -720,6 +721,7 @@ def export_transactions_xlsx(status=None, transaction_type=None, placement=None,
 		(lambda r: r.rejection_reason, "text"),
 		(lambda r: r.creation, "date"),
 		(lambda r: r.name, "text"),
+		(lambda r: r.placement, "text"),
 	]
 	_write_rows(worksheet, fmt, header_row + 1, rows, columns)
 
