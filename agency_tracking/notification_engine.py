@@ -113,6 +113,50 @@ def _get_vapid_config():
 	return ensure_vapid_keys()
 
 
+def _render_notification(template, context):
+	"""Turn a (template, context) pair into human-readable (title, body) text. The Web Push
+	payload has to carry real text -- a browser's service worker has no idea what a
+	"clearance_step_assigned" template key means -- so every template notify() is ever called
+	with (watchdogs.py, clearance_engine.py, chat_engine.py, background_jobs.py,
+	applicant_api.py, placement_api.py) needs a case here. An unrecognized template still
+	renders something reasonable rather than failing delivery."""
+	context = context or {}
+	if template == "clearance_step_assigned":
+		return "New Clearance Step Assigned", f"You've been assigned to Clearance Step {context.get('clearance_step')}."
+	if template == "placement_todo_assigned":
+		return "New Task Assigned", context.get("description") or f"New task on Placement {context.get('placement')}."
+	if template == "wakala_payment_reminder":
+		return (
+			"Wakala Payment Reminder",
+			context.get("message")
+			or f"Wakala payment due for Clearance Step {context.get('clearance_step')} (Placement {context.get('placement')}).",
+		)
+	if template == "chat_message":
+		return "New Message", f"New message from {context.get('sender')}."
+	if template == "background_job_completed":
+		job_type = context.get("job_type") or "Background job"
+		status = context.get("status") or "finished"
+		return (
+			f"{job_type} {status}",
+			f"Your {job_type} job for {context.get('reference_doctype')} {context.get('reference_name')} is {status}.",
+		)
+	if template and template.startswith("country_ban_"):
+		event = template[len("country_ban_") :].replace("_", " ").title()
+		return (
+			f"Country Ban {event}",
+			f"Applicant {context.get('applicant')}: {context.get('ban')} on {context.get('country')} -- {context.get('reason')}.",
+		)
+	if template == "kuwait_visa_agency_mismatch":
+		return (
+			"Visa Agency Mismatch",
+			f"Placement {context.get('placement')}: parsed visa agency '{context.get('visa_agency_name')}' "
+			f"doesn't match contractor '{context.get('contractor_name')}'.",
+		)
+	if template == "test_notification":
+		return "Test Notification", "This is a test push notification -- if you can see this, push delivery is working."
+	return "Travel Agency Workflow Alert", f"You have a new update ({template})."
+
+
 def _deliver_push(log):
 	subscriptions = frappe.get_all(
 		"Push Subscription", filters={"user": log.recipient}, fields=["endpoint", "p256dh", "auth"]
@@ -130,7 +174,8 @@ def _deliver_push(log):
 	vapid = Vapid01.from_pem(config.get_password("vapid_private_key").encode())
 	vapid_claims = {"sub": f"mailto:{config.vapid_claims_email}"}
 	context = frappe.parse_json(log.context) if log.context else {}
-	payload = frappe.as_json({"template": log.template, "context": context})
+	title, body = _render_notification(log.template, context)
+	payload = frappe.as_json({"title": title, "body": body})
 
 	errors = []
 	for sub in subscriptions:

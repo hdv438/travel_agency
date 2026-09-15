@@ -3839,6 +3839,55 @@
         ]
       }
     },
+    "/api/method/agency_tracking.notification_api.send_test_push": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Send a real test push notification to the current user",
+        "description": "Exercises the actual delivery pipeline (Comms Log -> pywebpush), not a client-side-only Notification() call -- proves whether server-to-device push genuinely works.",
+        "x-roles": [
+          "Any authenticated user"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/method/agency_tracking.notification_api.subscribe_to_push": {
       "post": {
         "tags": [

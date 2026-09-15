@@ -9,6 +9,7 @@ from agency_tracking.notification_engine import (
 	ensure_vapid_keys,
 	generate_vapid_keys as _generate_vapid_keys,
 	register_push_subscription as _register_push_subscription,
+	notify as _notify,
 )
 from agency_tracking.watchdogs import send_wakala_reminder
 
@@ -66,6 +67,17 @@ def trigger_wakala_reminder(clearance_step_name=None, **kwargs):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	send_wakala_reminder(clearance_step_name, step.placement)
 	return {"status": "reminder sent"}
+
+
+@frappe.whitelist()
+def send_test_push():
+	"""Sends a real push notification to the current user through the actual delivery pipeline
+	(Comms Log -> pywebpush), not a client-side-only Notification() call -- this is what lets
+	the "Test Alert" button genuinely prove whether server-to-device push works, instead of
+	passing even when the real pipeline is broken. Returns the resulting delivery status/error
+	so the frontend can show real feedback."""
+	log = _notify(frappe.session.user, "test_notification", {})
+	return {"status": log.status, "error": log.error}
 
 
 @frappe.whitelist(allow_guest=False)
