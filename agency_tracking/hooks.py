@@ -130,6 +130,11 @@ permission_query_conditions = {
 	"Placement": "agency_tracking.agency_tracking.doctype.placement.placement.get_permission_query_conditions",
 	"Applicant": "agency_tracking.agency_tracking.doctype.applicant.applicant.get_permission_query_conditions",
 	"Background Job": "agency_tracking.agency_tracking.doctype.background_job.background_job.get_permission_query_conditions",
+	# Unlike Commission Batch Request below, this one's JSON-granted roles (System
+	# Manager/Admin) are NOT fully trusted by the query condition -- it scopes even them to
+	# their own rows (only the literal Administrator user bypasses), so has_permission is
+	# still load-bearing, not redundant.
+	"Notification Read State": "agency_tracking.agency_tracking.doctype.notification_read_state.notification_read_state.get_permission_query_conditions",
 }
 
 # Single-document read/write gate. Background Job: load-bearing for its result PDF's own
@@ -151,6 +156,7 @@ has_permission = {
 	"Placement": "agency_tracking.agency_tracking.doctype.placement.placement.has_permission",
 	"Applicant": "agency_tracking.agency_tracking.doctype.applicant.applicant.has_permission",
 	"Clearance Step": "agency_tracking.agency_tracking.doctype.clearance_step.clearance_step.has_permission",
+	"Notification Read State": "agency_tracking.agency_tracking.doctype.notification_read_state.notification_read_state.has_permission",
 }
 
 # DocType Class
@@ -182,6 +188,7 @@ scheduler_events = {
 		"agency_tracking.watchdogs.contract_age_watchdog",
 		"agency_tracking.watchdogs.taeshir_injaz_reminder_watchdog",
 		"agency_tracking.watchdogs.departure_due_watchdog",
+		"agency_tracking.agency_tracking.doctype.notification_read_state.notification_read_state.cleanup_stale_read_state",
 	],
 	"hourly": [
 		# maybe_fetch_fx_rates checks FX Rate Settings' mode/interval and no-ops unless

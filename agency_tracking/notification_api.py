@@ -11,6 +11,7 @@ from agency_tracking.notification_engine import (
 	register_push_subscription as _register_push_subscription,
 	notify as _notify,
 )
+from agency_tracking.notification_feed import get_all_alerts
 from agency_tracking.watchdogs import send_wakala_reminder
 
 
@@ -91,3 +92,100 @@ def get_push_subscription_status():
 			frappe.db.exists("Push Subscription", {"user": frappe.session.user})
 		)
 	}
+
+
+def _upsert_read_state(user, alert_key, state):
+	"""Check-then-insert, same pattern as notification_engine.register_push_subscription --
+	dedupe_key's DB-level unique constraint (notification_read_state.json) is what makes this
+	safe against a race between the check and the insert, not the check itself."""
+	from frappe.utils import now_datetime
+
+	dedupe_key = f"{user}|{alert_key}"
+	existing = frappe.db.get_value("Notification Read State", {"dedupe_key": dedupe_key}, "name")
+	if existing:
+		frappe.db.set_value(
+			"Notification Read State", existing, {"state": state, "updated_at": now_datetime()}
+		)
+		return
+	try:
+		frappe.get_doc(
+			{
+				"doctype": "Notification Read State",
+				"user": user,
+				"alert_key": alert_key,
+				"dedupe_key": dedupe_key,
+				"state": state,
+				"updated_at": now_datetime(),
+			}
+		).insert(ignore_permissions=True)
+	except frappe.DuplicateEntryError:
+		# Lost a race against a concurrent insert for the same (user, alert_key) -- the row
+		# that won is functionally equivalent (upsert intent, not append), nothing to fix up.
+		frappe.db.rollback()
+		frappe.db.set_value(
+			"Notification Read State",
+			frappe.db.get_value("Notification Read State", {"dedupe_key": dedupe_key}, "name"),
+			{"state": state, "updated_at": now_datetime()},
+		)
+
+
+@frappe.whitelist()
+def get_live_alerts():
+	"""Server-derived, permission-scoped in-app notification feed (see notification_feed.py),
+	stamped with the calling user's own read/dismissed state. A brand-new device sees exactly
+	the same read/dismissed state as any other device, because it's looked up by user in
+	Notification Read State, not anything device- or session-local (sessionStorage/React
+	state) -- this is the actual fix for "a new device shows every notification at once"."""
+	alerts = get_all_alerts()
+	keys = [a["key"] for a in alerts]
+	states = {}
+	if keys:
+		# frappe.get_all, not get_list: Notification Read State's own DocType permissions only
+		# grant System Manager/Admin, so a get_list here would silently return nothing for
+		# every other role. Safe to bypass -- the filter below is hardcoded to the session
+		# user, never attacker-controlled.
+		rows = frappe.get_all(
+			"Notification Read State",
+			filters={"user": frappe.session.user, "alert_key": ["in", keys]},
+			fields=["alert_key", "state"],
+		)
+		states = {row.alert_key: row.state for row in rows}
+
+	unread_count = 0
+	for alert in alerts:
+		state = states.get(alert["key"])
+		alert["read"] = state is not None
+		alert["dismissed"] = state == "Dismissed"
+		if state is None:
+			unread_count += 1
+	return {"alerts": alerts, "unread_count": unread_count}
+
+
+@frappe.whitelist()
+def mark_alerts_read(alert_keys=None, **kwargs):
+	"""Bulk -- upserts every key to Read for the calling user in one round trip, so "mark all
+	read" (or the frontend watchdog dispatcher persisting "already surfaced this one") isn't N
+	separate requests. Always writes for frappe.session.user only -- never accepts a user
+	parameter, so one user can never mark another user's alerts."""
+	alert_keys = alert_keys or kwargs.get("keys")
+	if isinstance(alert_keys, str):
+		alert_keys = frappe.parse_json(alert_keys)
+	if not alert_keys:
+		return {"status": "ok", "updated": 0}
+	user = frappe.session.user
+	for key in alert_keys:
+		_upsert_read_state(user, key, "Read")
+	return {"status": "ok", "updated": len(alert_keys)}
+
+
+@frappe.whitelist()
+def set_alert_state(alert_key=None, state=None, **kwargs):
+	"""Dismiss (state="Dismissed") or restore (state="Read") a single alert for the calling
+	user. Always writes for frappe.session.user only -- same reasoning as mark_alerts_read."""
+	alert_key = alert_key or kwargs.get("key")
+	if not alert_key:
+		frappe.throw("alert_key is required.", frappe.ValidationError)
+	if state not in ("Read", "Dismissed"):
+		frappe.throw("state must be 'Read' or 'Dismissed'.", frappe.ValidationError)
+	_upsert_read_state(frappe.session.user, alert_key, state)
+	return {"status": "ok"}

@@ -3793,6 +3793,212 @@
         ]
       }
     },
+    "/api/method/agency_tracking.notification_api.get_live_alerts": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Fetch the server-derived, permission-scoped in-app notification feed",
+        "description": "Every alert currently true for anything the calling user can see (see notification_feed.py), stamped with that user's own read/dismissed state -- this is what a new device now sees identically to any other device, instead of everything showing as if new.",
+        "x-roles": [
+          "Any authenticated user"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "properties": {
+                    "alerts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "severity": {
+                            "type": "string"
+                          },
+                          "reference_doctype": {
+                            "type": "string"
+                          },
+                          "reference_name": {
+                            "type": "string"
+                          },
+                          "action_url": {
+                            "type": "string"
+                          },
+                          "read": {
+                            "type": "boolean"
+                          },
+                          "dismissed": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "unread_count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.notification_api.mark_alerts_read": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Bulk-mark alerts as read for the current user",
+        "description": "Upserts every given alert_key to Read for the calling user in one round trip. Always writes for the session user only -- never accepts a user parameter.",
+        "x-roles": [
+          "Any authenticated user"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "alert_keys",
+            "in": "formData",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "updated": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.notification_api.set_alert_state": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Dismiss or restore a single alert for the current user",
+        "description": "state=\"Dismissed\" to dismiss, state=\"Read\" to restore. Always writes for the session user only -- never accepts a user parameter.",
+        "x-roles": [
+          "Any authenticated user"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "alert_key",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "state",
+            "in": "formData",
+            "type": "string",
+            "enum": [
+              "Read",
+              "Dismissed"
+            ],
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/method/agency_tracking.notification_api.get_push_subscription_status": {
       "post": {
         "tags": [
