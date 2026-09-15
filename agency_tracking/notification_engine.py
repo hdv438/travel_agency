@@ -118,9 +118,36 @@ def _render_notification(template, context):
 	payload has to carry real text -- a browser's service worker has no idea what a
 	"clearance_step_assigned" template key means -- so every template notify() is ever called
 	with (watchdogs.py, clearance_engine.py, chat_engine.py, background_jobs.py,
-	applicant_api.py, placement_api.py) needs a case here. An unrecognized template still
+	applicant_api.py, placement_api.py) needs a case here, including the four passed as a
+	variable through watchdogs.py's _daily_notifier(template) rather than as a literal at the
+	notify() call site (medical_expiry_warning, contract_age_alert,
+	taeshir_injaz_payment_reminder, departure_due_reminder). An unrecognized template still
 	renders something reasonable rather than failing delivery."""
 	context = context or {}
+	if template == "medical_expiry_warning":
+		return (
+			"Medical Expiry Warning",
+			f"{context.get('full_name')}'s medical clearance expires in {context.get('days_remaining')} "
+			f"day(s) (Placement {context.get('placement')}).",
+		)
+	if template == "contract_age_alert":
+		return (
+			"Contract Age Alert",
+			f"Placement {context.get('placement')} has been open {context.get('age_days')} days "
+			f"(threshold {context.get('threshold_days')} days).",
+		)
+	if template == "taeshir_injaz_payment_reminder":
+		return (
+			"Taeshir/Injaz Payment Reminder",
+			f"Injaz payment due for Clearance Step {context.get('clearance_step')} "
+			f"(Placement {context.get('placement')}) -- appointment in {context.get('days_remaining')} day(s).",
+		)
+	if template == "departure_due_reminder":
+		return (
+			"Departure Confirmation Overdue",
+			f"Placement {context.get('placement')}'s flight date ({context.get('flight_date')}) has passed "
+			f"({context.get('days_overdue')} day(s) overdue) -- confirm departure.",
+		)
 	if template == "clearance_step_assigned":
 		return "New Clearance Step Assigned", f"You've been assigned to Clearance Step {context.get('clearance_step')}."
 	if template == "placement_todo_assigned":
