@@ -286,7 +286,7 @@ def _taeshir_status_for_placement(placement_name):
 
 
 @frappe.whitelist()
-def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
+def stamp_embassy_step(clearance_step_name=None, reference_no=None, override_reason=None, **kwargs):
 	"""Documents returned stamped (Thursday) -- the success outcome."""
 	clearance_step_name = clearance_step_name or kwargs.get("name") or kwargs.get("clearance_step")
 	reference_no = reference_no or kwargs.get("visa_number") or kwargs.get("reference")
@@ -314,6 +314,23 @@ def stamp_embassy_step(clearance_step_name=None, reference_no=None, **kwargs):
 				f"Taeshir must be complete before the Embassy step can be Stamped (Taeshir is '{taeshir_status or 'not started'}').",
 				frappe.ValidationError,
 			)
+	# Same Wakala gate as submit_embassy_step (Saudi corridor only), re-checked here because
+	# a step can reach Stamped without ever re-validating Wakala otherwise: a Manager override
+	# at Submit, or wakala_status being reverted via record_wakala_payment after Submit, would
+	# both slip past unnoticed. Only on the real Submitted->Stamped transition, not a
+	# data-only correction re-save.
+	if not is_correction and step.step_type == "Embassy" and step.wakala_status != "Paid":
+		is_management = bool({"Manager", "Admin", "System Manager"} & set(frappe.get_roles()))
+		if not (is_management and override_reason):
+			frappe.throw(
+				"Wakala must be Paid before Embassy documents can be Stamped.",
+				frappe.ValidationError,
+			)
+		log_action(
+			"Clearance Step",
+			step.name,
+			f"[{step.title or step.name}] Stamped with Wakala unpaid (Manager override): {override_reason}",
+		)
 	step.status = "Stamped"
 	step.date_completed = today()
 	step.completed_by = frappe.session.user
