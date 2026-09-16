@@ -885,31 +885,46 @@ def _load_upright_image(file_path):
 	return img.convert("RGB")
 
 
-def _preprocess_for_ocr(pil_img):
-	"""Grayscale + autocontrast + upscale-if-small -- cheap, well-established wins for Tesseract
-	accuracy specifically (as opposed to the orientation fix above, which is about the crop being
-	usable at all). MRZ glyphs need to be reasonably tall in pixels to OCR reliably; a tight crop
-	off a modest-resolution phone photo can end up well under Tesseract's effective minimum."""
+def _preprocess_variants(pil_img):
+	"""Yields (label, processed image) pairs -- more than one preprocessing recipe tried per
+	crop, since a weaker/older OCR engine build (confirmed live: production's Tesseract 5.3.0
+	read this pipeline's own passport-number/expiry fields correctly but missed the DOB digits
+	that a newer local build read fine -- packaged OCR engine/model versions genuinely vary
+	across environments and this can't be pinned to one exact combination) can respond
+	differently to each: plain grayscale+autocontrast is gentler and preserves anti-aliased glyph
+	edges an LSTM model often reads well, while a hard black/white threshold strips out low-
+	contrast background bleed-through (a printed guilloche/security pattern sitting directly
+	under the MRZ text, as on a real passport bio page) that can otherwise confuse a less capable
+	engine. Upscaled well above Tesseract's effective minimum glyph height either way -- a tight
+	crop off a modest-resolution source can otherwise end up too small to read reliably."""
 	from PIL import Image, ImageOps
 
 	gray = pil_img.convert("L")
 	gray = ImageOps.autocontrast(gray, cutoff=1)
-	if gray.width < 1200:
-		scale = 1200 / gray.width
+	target_width = 1600
+	if gray.width < target_width:
+		scale = target_width / gray.width
 		gray = gray.resize((int(gray.width * scale), int(gray.height * scale)), Image.Resampling.LANCZOS)
-	return gray
+	yield "gray", gray
+
+	binarized = gray.point(lambda p: 255 if p > 140 else 0)
+	yield "binarized", binarized
 
 
-def _ocr_mrz_text(pil_img):
-	"""Tesseract tuned specifically for a dense block of MRZ text: PSM 6 (a uniform block of
-	text -- appropriate for 2-3 fixed-width lines) and a character whitelist matching the MRZ
-	alphabet (A-Z, 0-9, '<'). Plain `pytesseract.image_to_string()` with no config uses the
-	general-purpose page-layout PSM and the full character set -- exactly the setting most likely
-	to hallucinate stray punctuation/lowercase noise from a busy background into the result."""
+def _candidate_ocr_texts(pil_img):
+	"""Every (preprocessing variant x page-segmentation mode) combination for one crop, most-
+	likely-useful first. PSM 6 (uniform block of text) suits a crop with both MRZ lines still
+	together; PSM 7 (single text line) can do better on a crop tight enough to isolate just one
+	line. More attempts than any single one needs, but OCR here only runs once per passport
+	upload (with an async job-queue alternative already available for exactly this reason), not
+	a request-latency-sensitive hot path -- so trading a handful of extra, cheap Tesseract calls
+	for a real shot at reading a borderline character correctly is a good trade."""
 	import pytesseract
 
-	config = "--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
-	return pytesseract.image_to_string(pil_img, config=config)
+	for variant_label, processed in _preprocess_variants(pil_img):
+		for psm in (6, 7):
+			config = f"--psm {psm} -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
+			yield f"{variant_label}/psm{psm}", pytesseract.image_to_string(processed, config=config)
 
 
 def _candidate_mrz_crops(pil_img):
@@ -1010,13 +1025,18 @@ def parse_passport_mrz(file_path: str) -> dict:
 			pass
 
 	# 3. Our own candidate-crop pipeline -- keeps going even after a fully-valid read, as long as
-	# its name split still looks implausible, because a different crop/scale can OCR the exact
-	# same line's '<' filler more cleanly and recover the correct split.
+	# its name split still looks implausible, because a different crop/scale/preprocessing/PSM
+	# combination can OCR the exact same line more cleanly and recover a correct name split or a
+	# checksummed field an earlier attempt missed.
 	try:
 		img = _load_upright_image(file_path)
-		for _label, crop in _candidate_mrz_crops(img):
-			ocr_text = _ocr_mrz_text(_preprocess_for_ocr(crop))
-			if _consider(extract_mrz_from_raw_text(ocr_text)):
+		done = False
+		for _crop_label, crop in _candidate_mrz_crops(img):
+			for _attempt_label, ocr_text in _candidate_ocr_texts(crop):
+				if _consider(extract_mrz_from_raw_text(ocr_text)):
+					done = True
+					break
+			if done:
 				break
 	except Exception:
 		frappe.log_error(title="Passport MRZ candidate-crop pipeline failed", message=frappe.get_traceback())
