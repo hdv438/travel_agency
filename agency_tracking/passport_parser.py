@@ -911,34 +911,72 @@ _paddle_ocr_instance = None
 def _get_paddle_ocr():
 	"""Lazily constructs and caches the PaddleOCR pipeline -- model loading takes a couple of
 	seconds and should happen once per worker process, not once per passport. Returns None if
-	PaddleOCR isn't installed. enable_mkldnn=False: see the FLAGS_use_mkldnn comment on the
-	import above for why oneDNN is disabled."""
+	PaddleOCR isn't installed.
+
+	Configured for the smallest memory footprint that still read both real passports on file
+	correctly (measured live): the "tiny" OCRv6 detection/recognition models instead of the
+	default "medium" ones, and the document/textline orientation classifiers turned off entirely
+	(orientation is instead handled cheaply beforehand by _load_upright_image, shared with the
+	Tesseract fallback below, rather than paying for two more loaded models here).
+
+	Measured finding, worth remembering before assuming a smaller model config fixes a memory
+	problem: switching medium -> tiny models changed peak RSS from ~912MB to ~912MB -- no
+	meaningful difference. The bulk of PaddleOCR's memory cost is PaddlePaddle's own framework/
+	runtime overhead from being loaded at all (~660-700MB baseline observed), not the specific
+	model weights -- so model choice and even the input image's size are minor levers here, not
+	the fix, if the actual constraint is total available memory in the process.
+
+	enable_mkldnn=False: see the FLAGS_use_mkldnn comment on the import above for why oneDNN is
+	disabled."""
 	global _paddle_ocr_instance
 	if _paddle_ocr_instance is None and PaddleOCR is not None:
 		_paddle_ocr_instance = PaddleOCR(
-			use_doc_orientation_classify=True,
+			use_doc_orientation_classify=False,
 			use_doc_unwarping=False,
-			use_textline_orientation=True,
-			lang="en",
+			use_textline_orientation=False,
+			text_detection_model_name="PP-OCRv6_tiny_det",
+			text_recognition_model_name="PP-OCRv6_tiny_rec",
 			enable_mkldnn=False,
 		)
 	return _paddle_ocr_instance
 
 
+# Full width, bottom MIN_...-to-100% of the (orientation-corrected) image height -- ICAO 9303
+# fixes the MRZ at the very bottom of a passport's bio-data page, so this needs no per-document
+# tuning. Generous on purpose (35% of a typical bio page comfortably includes the two MRZ lines
+# even on a wide/tall framing) since the cost of a miss is a fallback to the slower Tesseract
+# pipeline, not a wrong answer.
+_PADDLE_CROP_BOTTOM_RATIO = 0.35
+
+
 def _paddle_ocr_full_text(file_path):
-	"""Runs PaddleOCR on the given image directly and returns every recognized line joined into
-	one multi-line blob, sorted top-to-bottom by its bounding box position -- the same shape
+	"""Runs PaddleOCR on the bottom slice of the (orientation-corrected) image -- full width, see
+	_PADDLE_CROP_BOTTOM_RATIO -- and returns every recognized line joined into one multi-line
+	blob, sorted top-to-bottom by its bounding box position -- the same shape
 	extract_mrz_from_raw_text already expects and already knows how to search for MRZ-shaped
 	lines within (it doesn't need to be handed only the MRZ; recognized page labels and other
-	printed text are just harmless noise it already searches past). Returns None if PaddleOCR
-	isn't installed or the call fails for any reason -- the caller falls back to the rest of the
-	pipeline either way."""
+	printed text are just harmless noise it already searches past).
+
+	Cropping happens entirely in memory against a copy -- `file_path` itself is only ever read,
+	never modified, so the original upload (needed in full for the CV/photo record) is completely
+	unaffected by this. Returns None if PaddleOCR isn't installed or the call fails for any
+	reason (including, as observed live, the OS killing the process outright for memory -- a
+	SIGKILL can't be caught by this try/except, so that failure surfaces as the worker dying
+	rather than a logged error here; see this function's own memory-footprint notes on
+	_get_paddle_ocr) -- the caller falls back to the rest of the pipeline either way."""
 	ocr = _get_paddle_ocr()
 	if ocr is None:
 		return None
 	try:
+		import numpy as np
+
+		img = _load_upright_image(file_path)
+		w, h = img.size
+		crop = img.crop((0, int(h * (1 - _PADDLE_CROP_BOTTOM_RATIO)), w, h))
+		arr = np.array(crop)
+
 		lines = []
-		for res in ocr.predict(file_path):
+		for res in ocr.predict(arr):
 			payload = res.json.get("res", {}) if hasattr(res, "json") else {}
 			texts = payload.get("rec_texts") or []
 			polys = payload.get("rec_polys")
