@@ -727,19 +727,31 @@ def map_mrz_fields(mrz_dict: dict) -> dict:
 	elif sex in ("F", "FEMALE"):
 		fields["gender"] = "Female"
 
-	# Names: prefer a first/middle/last already split by our own parsers; otherwise (e.g. a raw
-	# PassportEye dict with surname/names) split here. Always carry the middle name through.
+	# Names carry NO checksum at all in the MRZ standard (ICAO 9303 only checksums the document
+	# number, DOB, expiry, and an optional personal-number field) -- so if the OCR locked onto the
+	# wrong region of the image (a real risk on a full, uncropped passport photo: a security
+	# pattern, the photo border, other printed text can all look like a plausible text band), a
+	# garbled "name" has nothing checking it and sails straight through. The composite check
+	# below is the only real defense: only trust a name when EVERY field that *does* have a
+	# checksum agrees. `cv` empty (e.g. a raw, unvalidated dict with no checksum_validation at
+	# all) is treated as untrusted, not "nothing to check" -- see _ok()'s own docstring for why an
+	# unknown entry there defaults True, which is correct for individual fields but wrong here.
+	composite_ok = bool(cv) and _ok("passport_number") and _ok("date_of_birth") and _ok("expiry_date")
+	if not composite_ok:
+		needs_review = True
+
 	first = mrz_dict.get("first_name")
 	middle = mrz_dict.get("middle_name")
 	last = mrz_dict.get("last_name")
 	if not (first or last):
 		first, middle, last = split_name_parts(mrz_dict.get("surname"), mrz_dict.get("names"))
-	if first:
-		fields["first_name"] = str(first).title()
-	if middle:
-		fields["middle_name"] = str(middle).title()
-	if last:
-		fields["last_name"] = str(last).title()
+	if composite_ok:
+		if first:
+			fields["first_name"] = str(first).title()
+		if middle:
+			fields["middle_name"] = str(middle).title()
+		if last:
+			fields["last_name"] = str(last).title()
 
 	nat = mrz_dict.get("nationality")
 	if not nat:
@@ -759,59 +771,179 @@ def map_mrz_fields(mrz_dict: dict) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Master Passport MRZ File Parser
+# 5. Robust image normalization + candidate MRZ localization
+# ─────────────────────────────────────────────────────────────────────────────
+# Why this exists: PassportEye locates the MRZ by scanning the whole image for a "long, thin,
+# high-contrast horizontal text band" (a contour heuristic). On a clean, pre-cropped MRZ strip
+# that's trivially the only thing in frame. On a real, full, uncropped passport photo (angled,
+# background in frame, glare, the biometric photo/hologram/other printed text also being
+# high-contrast) it can lock onto the WRONG region entirely -- and unlike the document-number/
+# DOB/expiry fields, an MRZ "name" carries no checksum at all in the ICAO 9303 standard, so
+# garbage OCR'd off the wrong region used to sail straight into first_name/last_name with nothing
+# to catch it. The functions below give the parser other, more reliable ways to find the real MRZ
+# band even without a pre-crop, and map_mrz_fields' own composite check (above) refuses to trust
+# a name at all unless every field that DOES have a checksum agrees.
+
+
+def _mrz_score(parsed):
+	"""How many of the three checksummed MRZ fields (passport number, DOB, expiry) validated --
+	3 means fully trustworthy (composite_ok in map_mrz_fields), lower scores are still useful as
+	a "best guess so far" ranking across multiple OCR attempts on different crops/strategies."""
+	if not parsed:
+		return -1
+	cv = parsed.get("checksum_validation") or {}
+
+	def ok(key):
+		entry = cv.get(key)
+		return bool(isinstance(entry, dict) and entry.get("valid"))
+
+	return sum([ok("passport_number"), ok("date_of_birth"), ok("expiry_date")])
+
+
+def _load_upright_image(file_path):
+	"""Corrects orientation two independent ways, since a wrong-way-up image defeats MRZ box
+	detection just as badly as a wrong crop does: (1) EXIF says "rotate on display" but the raw
+	pixels are stored sideways -- extremely common straight off a phone camera, and silently
+	ignored by naive loaders (skimage's `imread` among them, which is what PassportEye uses
+	internally) -- corrected via PIL's own EXIF-aware transpose; (2) no usable EXIF at all but the
+	photo is genuinely sideways/upside-down (a scan, or EXIF stripped by an upload pipeline) --
+	caught by Tesseract's own orientation/script-detection (OSD) pass instead."""
+	from PIL import Image, ImageOps
+
+	img = Image.open(file_path)
+	img = ImageOps.exif_transpose(img)
+
+	try:
+		import pytesseract
+
+		osd = pytesseract.image_to_osd(img)
+		m = re.search(r"Rotate:\s*(\d+)", osd)
+		if m and int(m.group(1)):
+			img = img.rotate(-int(m.group(1)), expand=True)
+	except Exception:
+		pass  # OSD needs a reasonable amount of real text on the page -- fine to skip, not fatal
+
+	return img.convert("RGB")
+
+
+def _preprocess_for_ocr(pil_img):
+	"""Grayscale + autocontrast + upscale-if-small -- cheap, well-established wins for Tesseract
+	accuracy specifically (as opposed to the orientation fix above, which is about the crop being
+	usable at all). MRZ glyphs need to be reasonably tall in pixels to OCR reliably; a tight crop
+	off a modest-resolution phone photo can end up well under Tesseract's effective minimum."""
+	from PIL import Image, ImageOps
+
+	gray = pil_img.convert("L")
+	gray = ImageOps.autocontrast(gray, cutoff=1)
+	if gray.width < 1200:
+		scale = 1200 / gray.width
+		gray = gray.resize((int(gray.width * scale), int(gray.height * scale)), Image.Resampling.LANCZOS)
+	return gray
+
+
+def _ocr_mrz_text(pil_img):
+	"""Tesseract tuned specifically for a dense block of MRZ text: PSM 6 (a uniform block of
+	text -- appropriate for 2-3 fixed-width lines) and a character whitelist matching the MRZ
+	alphabet (A-Z, 0-9, '<'). Plain `pytesseract.image_to_string()` with no config uses the
+	general-purpose page-layout PSM and the full character set -- exactly the setting most likely
+	to hallucinate stray punctuation/lowercase noise from a busy background into the result."""
+	import pytesseract
+
+	config = "--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
+	return pytesseract.image_to_string(pil_img, config=config)
+
+
+def _candidate_mrz_crops(pil_img):
+	"""Yields (label, PIL image) candidates most likely to contain ONLY the MRZ band, most-likely
+	framing first. ICAO 9303 fixes the MRZ at the very bottom of a passport's bio-data page, so
+	"the bottom slice of whatever was uploaded" is a strong, dependency-free prior regardless of
+	how the rest of the page is framed -- unlike PassportEye's contour-based locator, this can't
+	be fooled by a high-contrast pattern elsewhere in the photo, because it never looks anywhere
+	else. Multiple ratios cover both a tight photo of just the bio page and a wider one that
+	includes surrounding table/background."""
+	w, h = pil_img.size
+	yield "full", pil_img
+	for ratio in (0.15, 0.20, 0.25, 0.30, 0.35):
+		top = int(h * (1 - ratio))
+		yield f"bottom-{int(ratio * 100)}pct", pil_img.crop((0, top, w, h))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Master Passport MRZ File Parser
 # ─────────────────────────────────────────────────────────────────────────────
 def parse_passport_mrz(file_path: str) -> dict:
 	"""
 	Given a filesystem path to a passport scan/photo/PDF, extracts MRZ and returns
-	Applicant field updates. Uses multiple parsing strategies:
-	1. Text stream extraction (PyMuPDF / pypdf) with ICAO 9303 checksum self-correction
-	2. PassportEye MRZ image OCR
-	3. Visual regex fallback
+	Applicant field updates. Tries strategies in order of accuracy/cost and keeps the first
+	FULLY checksum-valid result (all of passport number, DOB, expiry agree):
+	1. Text stream extraction (PyMuPDF / pypdf) -- a real text layer needs no OCR guessing at all.
+	2. PassportEye's own MRZ box locator, when it finds one.
+	3. Our own candidate-crop pipeline (orientation-corrected full image, then several MRZ-band
+	   crops) -- this is what makes a full, uncropped passport photo reliable without needing the
+	   frontend to pre-crop to the MRZ, and without needing PassportEye's detector to succeed.
+	If nothing validates fully, returns the best partial match found (map_mrz_fields flags it
+	needs_passport_review and withholds the name fields, which have no checksum of their own).
 	Never raises exceptions — gracefully logs and returns empty dict on failure.
 	"""
 	if not file_path or not os.path.exists(file_path):
 		return {}
 
-	# 1. If PDF document, extract text stream directly
+	best_result, best_score = None, -1
+
+	def _consider(parsed):
+		nonlocal best_result, best_score
+		if not parsed:
+			return None
+		score = _mrz_score(parsed)
+		if score == 3:
+			return map_mrz_fields(parsed)
+		if score > best_score:
+			best_result, best_score = parsed, score
+		return None
+
+	# 1. If PDF document, extract text stream directly.
 	if file_path.lower().endswith(".pdf"):
 		try:
 			from agency_tracking.contract_parser import extract_text_from_pdf
+
 			raw_text = extract_text_from_pdf(file_path)
 			if raw_text:
-				parsed = extract_mrz_from_raw_text(raw_text)
-				if parsed:
-					return map_mrz_fields(parsed)
+				result = _consider(extract_mrz_from_raw_text(raw_text))
+				if result:
+					return result
 		except Exception:
 			pass
 
-	# 2. Use PassportEye if available
+	# 2. PassportEye's own locator -- re-run its raw OCR text through our own checksum-aware
+	# parser rather than trusting its dict directly (it has no equivalent composite gate, and
+	# would otherwise hand back an un-validated guess as if it were confirmed).
 	if read_mrz:
 		try:
 			mrz = read_mrz(file_path)
-			if mrz:
-				mrz_dict = mrz.to_dict()
-				# If raw lines exist, run through ICAO 9303 checksum validator
-				if mrz_dict.get("raw_text"):
-					parsed_raw = extract_mrz_from_raw_text(mrz_dict["raw_text"])
-					if parsed_raw:
-						return map_mrz_fields(parsed_raw)
-				return map_mrz_fields(mrz_dict)
+			raw_text = mrz.to_dict().get("raw_text") if mrz else None
+			if raw_text:
+				result = _consider(extract_mrz_from_raw_text(raw_text))
+				if result:
+					return result
 		except Exception:
 			pass
 
-	# 3. Read image as raw text if pytesseract available
+	# 3. Our own candidate-crop pipeline.
 	try:
-		import pytesseract
-		from PIL import Image
-		img = Image.open(file_path)
-		ocr_text = pytesseract.image_to_string(img)
-		if ocr_text:
-			parsed = extract_mrz_from_raw_text(ocr_text)
-			if parsed:
-				return map_mrz_fields(parsed)
+		img = _load_upright_image(file_path)
+		for _label, crop in _candidate_mrz_crops(img):
+			ocr_text = _ocr_mrz_text(_preprocess_for_ocr(crop))
+			result = _consider(extract_mrz_from_raw_text(ocr_text))
+			if result:
+				return result
 	except Exception:
-		pass
+		frappe.log_error(title="Passport MRZ candidate-crop pipeline failed", message=frappe.get_traceback())
+
+	# Nothing validated fully across every strategy -- return the best (but unverified) guess,
+	# still flagged needs_passport_review with names withheld by map_mrz_fields' own gate. Better
+	# than blank for the fields that DO have partial checksum support; staff re-key the rest.
+	if best_result:
+		return map_mrz_fields(best_result)
 
 	return {}
 
