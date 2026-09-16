@@ -242,6 +242,27 @@ def infer_passport_issue_date(passport_expiry_str):
 		return None
 
 
+def _looks_like_name_token(token):
+	"""A real human name, transliterated to Latin script, always has at least one vowel and
+	isn't just a couple of letters repeated over and over -- both true regardless of length, and
+	both reliably broken by misread MRZ '<' padding that happened to OCR as letters instead of
+	literal '<'. Confirmed live: a low-resolution scan turned the trailing filler after a
+	genuinely correct name into strings like "CCCCCLLCLLLCLCLLCLLKL" -- no vowels, only three
+	distinct letters -- short enough to dodge a pure length check but still obvious noise once
+	looked at this way. The diversity check is ratio-based, not a fixed minimum count, so it
+	doesn't reject a genuinely short, repetitive real name like "Anna" (2 distinct letters in 4,
+	a healthy 0.5 ratio) while still catching a long low-diversity run (0.1-0.15 in the examples
+	actually seen)."""
+	if not token:
+		return False
+	upper = token.upper()
+	if not any(c in "AEIOU" for c in upper):
+		return False
+	if len(set(upper)) / len(upper) < 0.25:
+		return False
+	return True
+
+
 def split_name_parts(surname, given_names):
 	"""Split a passport name into (first, middle, last) using Ethiopian / ICAO ordering.
 
@@ -252,10 +273,17 @@ def split_name_parts(surname, given_names):
 	middle = everything in between. This stops the middle (father's) name being mistaken for the
 	last name when the surname field carries more than one token, and never drops the middle name.
 
+	Tokens that don't look name-shaped (see _looks_like_name_token) are dropped before any of
+	this positional assignment happens -- filtering garbage out up front, rather than assembling
+	it into first/middle/last and only flagging the damage afterward, so a spurious extra token
+	(misread trailing padding) can't shift which real token ends up as the surname.
+
 	Returns (first, middle, last) with middle/last possibly None. Casing is left to the caller.
 	"""
 	given_tokens = [t for t in re.split(r"\s+", (given_names or "").replace("<", " ").strip()) if t]
 	surname_tokens = [t for t in re.split(r"\s+", (surname or "").replace("<", " ").strip()) if t]
+	given_tokens = [t for t in given_tokens if _looks_like_name_token(t)]
+	surname_tokens = [t for t in surname_tokens if _looks_like_name_token(t)]
 	seq = given_tokens + surname_tokens
 	if not seq:
 		return "", None, None
@@ -263,6 +291,40 @@ def split_name_parts(surname, given_names):
 	last = seq[-1] if len(seq) >= 2 else None
 	middle = " ".join(seq[1:-1]) if len(seq) > 2 else None
 	return first, middle, last
+
+
+# Characters CHAR_CONFUSIONS already lists as common OCR misreads of '<' -- reused here (see
+# _split_surname_given) to recognize a "<<" delimiter even when one of its two characters landed
+# as a stray letter instead, rather than needing a fresh confusion table for the same glyph.
+_DOUBLE_DELIM_CONFUSABLES = set(CHAR_CONFUSIONS["<"])
+
+
+def _split_surname_given(name_field):
+	"""Splits an MRZ name field into (surname, given_names) on the double-'<' delimiter,
+	tolerating ONE of the two '<' characters being misread as a common confusable.
+
+	Confirmed live, two distinct failures this was built to catch:
+	1. "<<" OCR'd as "C<" ("BEYENEC<BEGONET..." instead of "BEYENE<<BEGONET...") -- no literal
+	   "<<" at the real boundary at all, so a plain str.split("<<") silently collapsed the whole
+	   field into one bucket with given_names empty, scrambling first/middle/last even though
+	   every individual name token had actually been read correctly.
+	2. Naively using `str.find("<<")` for a tolerant search STILL picked the wrong spot on that
+	   same real case: the trailing '<' padding after the field's real content (always present,
+	   to fill the line to 44 characters) contains a genuine literal "<<" run of its own, further
+	   right in the string -- `find` returned that first if the real boundary earlier on was only
+	   a confusable-tolerant match, not an exact one, since it was never given the chance to
+	   compare positions. Scanning left-to-right and taking whichever kind of match -- exact or
+	   tolerant -- comes FIRST positionally fixes both: the real boundary is always well before
+	   the padding tail, so the earliest match is always the right one.
+
+	Falls back to no split at all (given_names empty) only when nothing plausible is found."""
+	for i in range(len(name_field) - 1):
+		a, b = name_field[i], name_field[i + 1]
+		if a == "<" and (b == "<" or b in _DOUBLE_DELIM_CONFUSABLES):
+			return name_field[:i], name_field[i + 2 :]
+		if b == "<" and a in _DOUBLE_DELIM_CONFUSABLES:
+			return name_field[:i], name_field[i + 2 :]
+	return name_field, ""
 
 
 def _locate_country_code(line1_prefix):
@@ -319,11 +381,9 @@ def parse_mrz_td3(line1, line2):
 		issuing_country_code = line1[2:5].replace("<", "")
 	name_field = line1[name_field_start:44]
 
-	name_parts = name_field.split("<<")
-	surname = name_parts[0].replace("<", " ").strip()
-	given_names = ""
-	if len(name_parts) > 1:
-		given_names = name_parts[1].replace("<", " ").strip()
+	surname_raw, given_raw = _split_surname_given(name_field)
+	surname = surname_raw.replace("<", " ").strip()
+	given_names = given_raw.replace("<", " ").strip()
 
 	# Ordered split across BOTH fields (given names + surname) so the middle name is never lost
 	# nor merged into the last name -- see split_name_parts.
