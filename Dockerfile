@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl-dev libffi-dev libjpeg62-turbo-dev zlib1g-dev libwebp-dev \
         mariadb-client redis-server \
         wkhtmltopdf xfonts-75dpi xfonts-base \
-        tesseract-ocr \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd \
         supervisor cron \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
