@@ -265,6 +265,30 @@ def split_name_parts(surname, given_names):
 	return first, middle, last
 
 
+def _locate_country_code(line1_prefix):
+	"""Finds a known ISO alpha-3 country code within the first several characters of an MRZ
+	line, tolerating OCR inserting or dropping a character before it in the document-code area.
+
+	Confirmed live: an inserted stray letter before the country code ("PAQETH..." instead of
+	"PQETH...") shifted the fixed-position name field (line1[5:44]) one character early, prefixing
+	the surname with the country code's own trailing letter ("Hwachamo" instead of "Wachamo") --
+	even though the surname/given-names themselves were read correctly. The document-number/DOB/
+	expiry checksums on line 2 can't catch this at all, since it's a line-1-only, pre-name-field
+	problem. Scanning outward from the canonical position (2) for a real country code recovers
+	the true field boundary instead of trusting a position that OCR may have shifted.
+
+	Returns (code, end_index) for the first match found, or (None, None) if nothing recognizable
+	turns up in this short window (falls back to the fixed position 2:5)."""
+	for offset in (0, -1, 1, -2, 2):
+		start = 2 + offset
+		if start < 0:
+			continue
+		candidate = line1_prefix[start : start + 3]
+		if candidate in ISO_ALPHA3_TO_COUNTRY:
+			return candidate, start + 3
+	return None, None
+
+
 def parse_mrz_td3(line1, line2):
 	"""
 	Parses standard Type 3 (TD3) Passport MRZ (2 lines x 44 characters).
@@ -286,8 +310,14 @@ def parse_mrz_td3(line1, line2):
 
 	# --- Line 1 Breakdown ---
 	doc_code = line1[0:2].replace("<", "")
-	issuing_country_code = line1[2:5].replace("<", "")
-	name_field = line1[5:44]
+	name_field_start = 5
+	located_code, located_end = _locate_country_code(line1[:10])
+	if located_code:
+		issuing_country_code = located_code
+		name_field_start = located_end
+	else:
+		issuing_country_code = line1[2:5].replace("<", "")
+	name_field = line1[name_field_start:44]
 
 	name_parts = name_field.split("<<")
 	surname = name_parts[0].replace("<", " ").strip()
@@ -817,6 +847,16 @@ def _mrz_score(parsed):
 	return sum([ok("passport_number"), ok("date_of_birth"), ok("expiry_date")])
 
 
+# Confirmed live on a real, genuinely upright passport scan: Tesseract's OSD suggested a 180-
+# degree rotation at confidence 0.40-1.52 (and misidentified the script as Bengali at a similarly
+# low confidence) -- a passport bio page is mostly decorative script, security-pattern watermarks,
+# and a small dense MRZ block, exactly the kind of page OSD has little real signal to work with.
+# Applying its guess unconditionally flipped a correct image upside down, which sent every
+# bottom-band MRZ crop looking at the wrong half of the page entirely. This floor is set well
+# above the observed noise range; a genuine sideways/upside-down photo reports much higher.
+MIN_OSD_ROTATION_CONFIDENCE = 3.0
+
+
 def _load_upright_image(file_path):
 	"""Corrects orientation two independent ways, since a wrong-way-up image defeats MRZ box
 	detection just as badly as a wrong crop does: (1) EXIF says "rotate on display" but the raw
@@ -824,7 +864,9 @@ def _load_upright_image(file_path):
 	ignored by naive loaders (skimage's `imread` among them, which is what PassportEye uses
 	internally) -- corrected via PIL's own EXIF-aware transpose; (2) no usable EXIF at all but the
 	photo is genuinely sideways/upside-down (a scan, or EXIF stripped by an upload pipeline) --
-	caught by Tesseract's own orientation/script-detection (OSD) pass instead."""
+	caught by Tesseract's own orientation/script-detection (OSD) pass instead, only trusted above
+	MIN_OSD_ROTATION_CONFIDENCE (see its own comment for why a low-confidence guess is dangerous
+	here specifically)."""
 	from PIL import Image, ImageOps
 
 	img = Image.open(file_path)
@@ -833,10 +875,10 @@ def _load_upright_image(file_path):
 	try:
 		import pytesseract
 
-		osd = pytesseract.image_to_osd(img)
-		m = re.search(r"Rotate:\s*(\d+)", osd)
-		if m and int(m.group(1)):
-			img = img.rotate(-int(m.group(1)), expand=True)
+		osd = pytesseract.image_to_osd(img, output_type=pytesseract.Output.DICT)
+		rotate_by = osd.get("rotate") or 0
+		if rotate_by and osd.get("orientation_conf", 0) >= MIN_OSD_ROTATION_CONFIDENCE:
+			img = img.rotate(-rotate_by, expand=True)
 	except Exception:
 		pass  # OSD needs a reasonable amount of real text on the page -- fine to skip, not fatal
 
