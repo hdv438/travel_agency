@@ -71,6 +71,14 @@ MONTH_MAP = {
 
 MRZ_SEX_TO_GENDER = {"M": "Male", "F": "Female"}
 
+# A real single given/family name is essentially always shorter than this. Longer is a strong
+# signal that an MRZ '<' filler between two separate names was OCR'd as a stray letter and the
+# names got glued into one run-on token -- there's no checksum on the name field to catch this
+# any other way. Used both to flag a suspicious result for review (map_mrz_fields) and to prefer
+# a better-split candidate when several crops all otherwise read the MRZ correctly
+# (_name_plausibility_score).
+MAX_PLAUSIBLE_NAME_TOKEN_LENGTH = 14
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. ICAO 9303 Checksum Decoder & Self-Correction Engine
 # ─────────────────────────────────────────────────────────────────────────────
@@ -746,6 +754,15 @@ def map_mrz_fields(mrz_dict: dict) -> dict:
 	if not (first or last):
 		first, middle, last = split_name_parts(mrz_dict.get("surname"), mrz_dict.get("names"))
 	if composite_ok:
+		# The given-names field separates individual names with a single '<' filler -- OCR
+		# misreading that one character as a stray letter (confirmed live: a '<' read as 'S')
+		# glues two names into one run-on token with no delimiter left to split on. Nothing
+		# checksums the name field, so this can't be caught the way a digit field would be; a
+		# token well beyond any real single name's length is the only signal available, and it's
+		# still surfaced (not blanked) since a visibly-too-long guess is faster for staff to fix
+		# than an empty field, but it's flagged so it doesn't look like a clean, confirmed read.
+		if any(len(n) > MAX_PLAUSIBLE_NAME_TOKEN_LENGTH for n in (first, middle, last) if n):
+			needs_review = True
 		if first:
 			fields["first_name"] = str(first).title()
 		if middle:
@@ -860,12 +877,29 @@ def _candidate_mrz_crops(pil_img):
 	how the rest of the page is framed -- unlike PassportEye's contour-based locator, this can't
 	be fooled by a high-contrast pattern elsewhere in the photo, because it never looks anywhere
 	else. Multiple ratios cover both a tight photo of just the bio page and a wider one that
-	includes surrounding table/background."""
+	includes surrounding table/background -- and, incidentally, each crop gets a different
+	effective upscale factor in _preprocess_for_ocr (narrower crop -> more upscaling), so they can
+	genuinely OCR the same physical line differently, which is exploited below to recover a
+	cleaner name split even after one crop already reads the checksummed fields correctly."""
 	w, h = pil_img.size
 	yield "full", pil_img
 	for ratio in (0.15, 0.20, 0.25, 0.30, 0.35):
 		top = int(h * (1 - ratio))
 		yield f"bottom-{int(ratio * 100)}pct", pil_img.crop((0, top, w, h))
+
+
+def _name_plausibility_score(parsed):
+	"""1 if the given/surname split looks like real, separate names; 0 if any token is
+	suspiciously long (see MAX_PLAUSIBLE_NAME_TOKEN_LENGTH). Checksums can't tell two equally
+	"fully valid" MRZ reads apart when they disagree only on how the name field was split -- this
+	is the tiebreaker used to prefer whichever crop/attempt happened to OCR the '<' filler between
+	given names cleanly."""
+	if not parsed:
+		return -1
+	names = [n for n in (parsed.get("first_name"), parsed.get("middle_name"), parsed.get("last_name")) if n]
+	if any(len(n) > MAX_PLAUSIBLE_NAME_TOKEN_LENGTH for n in names):
+		return 0
+	return 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -874,13 +908,16 @@ def _candidate_mrz_crops(pil_img):
 def parse_passport_mrz(file_path: str) -> dict:
 	"""
 	Given a filesystem path to a passport scan/photo/PDF, extracts MRZ and returns
-	Applicant field updates. Tries strategies in order of accuracy/cost and keeps the first
-	FULLY checksum-valid result (all of passport number, DOB, expiry agree):
+	Applicant field updates. Tries strategies in order of accuracy/cost:
 	1. Text stream extraction (PyMuPDF / pypdf) -- a real text layer needs no OCR guessing at all.
 	2. PassportEye's own MRZ box locator, when it finds one.
 	3. Our own candidate-crop pipeline (orientation-corrected full image, then several MRZ-band
 	   crops) -- this is what makes a full, uncropped passport photo reliable without needing the
 	   frontend to pre-crop to the MRZ, and without needing PassportEye's detector to succeed.
+	Stops as soon as a result is BOTH fully checksum-valid (passport number, DOB, expiry all
+	agree) AND has a plausible name split; a fully-valid-but-implausible-name result keeps trying
+	further candidates first, since a name typo can't be caught by checksums the way a digit
+	field can -- only a differently-OCR'd attempt of the same line can fix it.
 	If nothing validates fully, returns the best partial match found (map_mrz_fields flags it
 	needs_passport_review and withholds the name fields, which have no checksum of their own).
 	Never raises exceptions — gracefully logs and returns empty dict on failure.
@@ -888,18 +925,24 @@ def parse_passport_mrz(file_path: str) -> dict:
 	if not file_path or not os.path.exists(file_path):
 		return {}
 
-	best_result, best_score = None, -1
+	best_result, best_score = None, -1  # best PARTIAL match (score < 3), for the final fallback
+	best_valid, best_valid_names = None, -1  # best FULLY checksum-valid match, by name plausibility
 
 	def _consider(parsed):
-		nonlocal best_result, best_score
+		"""Records `parsed` as a candidate. Returns True once it's good enough (fully checksum-
+		valid AND a plausible name split) that trying further candidates isn't worth it."""
+		nonlocal best_result, best_score, best_valid, best_valid_names
 		if not parsed:
-			return None
+			return False
 		score = _mrz_score(parsed)
 		if score == 3:
-			return map_mrz_fields(parsed)
+			names_score = _name_plausibility_score(parsed)
+			if names_score > best_valid_names:
+				best_valid, best_valid_names = parsed, names_score
+			return names_score == 1
 		if score > best_score:
 			best_result, best_score = parsed, score
-		return None
+		return False
 
 	# 1. If PDF document, extract text stream directly.
 	if file_path.lower().endswith(".pdf"):
@@ -907,10 +950,8 @@ def parse_passport_mrz(file_path: str) -> dict:
 			from agency_tracking.contract_parser import extract_text_from_pdf
 
 			raw_text = extract_text_from_pdf(file_path)
-			if raw_text:
-				result = _consider(extract_mrz_from_raw_text(raw_text))
-				if result:
-					return result
+			if raw_text and _consider(extract_mrz_from_raw_text(raw_text)):
+				return map_mrz_fields(best_valid)
 		except Exception:
 			pass
 
@@ -921,23 +962,31 @@ def parse_passport_mrz(file_path: str) -> dict:
 		try:
 			mrz = read_mrz(file_path)
 			raw_text = mrz.to_dict().get("raw_text") if mrz else None
-			if raw_text:
-				result = _consider(extract_mrz_from_raw_text(raw_text))
-				if result:
-					return result
+			if raw_text and _consider(extract_mrz_from_raw_text(raw_text)):
+				return map_mrz_fields(best_valid)
 		except Exception:
 			pass
 
-	# 3. Our own candidate-crop pipeline.
+	# 3. Our own candidate-crop pipeline -- keeps going even after a fully-valid read, as long as
+	# its name split still looks implausible, because a different crop/scale can OCR the exact
+	# same line's '<' filler more cleanly and recover the correct split.
 	try:
 		img = _load_upright_image(file_path)
 		for _label, crop in _candidate_mrz_crops(img):
 			ocr_text = _ocr_mrz_text(_preprocess_for_ocr(crop))
-			result = _consider(extract_mrz_from_raw_text(ocr_text))
-			if result:
-				return result
+			if _consider(extract_mrz_from_raw_text(ocr_text)):
+				break
 	except Exception:
 		frappe.log_error(title="Passport MRZ candidate-crop pipeline failed", message=frappe.get_traceback())
+
+	if best_valid:
+		result = map_mrz_fields(best_valid)
+		if best_valid_names == 0:
+			# Every checksummed field agrees, but no attempt produced a plausible name split --
+			# still the most useful result available (names visibly need a quick fix, everything
+			# else is confirmed correct), so surface it rather than discarding a mostly-good read.
+			result["needs_passport_review"] = 1
+		return result
 
 	# Nothing validated fully across every strategy -- return the best (but unverified) guess,
 	# still flagged needs_passport_review with names withheld by map_mrz_fields' own gate. Better
