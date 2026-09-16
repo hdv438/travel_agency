@@ -226,6 +226,14 @@ fi
 bench set-config -g default_site "$SITE_NAME"
 bench set-config -g serve_default_site true
 bench --site "$SITE_NAME" set-config host_name "https://${SITE_NAME}"
+
+# Passport OCR: OCR.space API key (see agency_tracking/passport_parser.py's
+# `_ocrspace_full_text` -- reads this back via frappe.conf.get("ocrspace_api_key")). Optional --
+# passport parsing degrades gracefully to the self-hosted Tesseract pipeline if unset.
+if [ -n "${OCRSPACE_API_KEY:-}" ]; then
+  bench --site "$SITE_NAME" set-config ocrspace_api_key "$OCRSPACE_API_KEY"
+fi
+
 echo "$SITE_NAME" > sites/currentsite.txt
 
 chown -R frappe:frappe sites

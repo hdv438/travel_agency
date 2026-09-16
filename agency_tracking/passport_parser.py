@@ -7,6 +7,8 @@ import io
 import datetime
 import unicodedata
 
+import requests
+
 import frappe
 from frappe.utils import getdate
 
@@ -19,19 +21,6 @@ try:
 	import pycountry
 except ImportError:
 	pycountry = None
-
-# oneDNN (CPU inference acceleration) crashes PaddlePaddle's PIR executor on some CPU/library
-# combinations ("ConvertPirAttribute2RuntimeAttribute not support ..." from onednn_instruction.cc,
-# confirmed live) -- disabled globally before PaddleOCR is ever constructed, trading a slower
-# inference for one that reliably doesn't crash. Set as an env var (belt) in addition to the
-# constructor's own enable_mkldnn=False (suspenders) since the failing code path is inside
-# PaddlePaddle's own executor, not something confirmed scoped only to the flag PaddleOCR exposes.
-os.environ.setdefault("FLAGS_use_mkldnn", "false")
-
-try:
-	from paddleocr import PaddleOCR
-except ImportError:
-	PaddleOCR = None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. ISO 3166-1 Alpha-3 Country Mapping & Constants
@@ -273,7 +262,42 @@ def _looks_like_name_token(token):
 		return False
 	if len(set(upper)) / len(upper) < 0.25:
 		return False
+	if _has_repeated_run(upper):
+		return False
 	return True
+
+
+def _has_repeated_run(upper_token, min_run=3):
+	"""True if the same character repeats `min_run`-or-more times in a row. A real human name,
+	transliterated to Latin script, essentially never does this -- confirmed live on an ICAO
+	specimen document: a misread MRZ filler run OCR'd as "...LKKKKLCCLELCE", which has a vowel
+	and clears the diversity-ratio check above (4 distinct letters across 13), so it slipped past
+	that gate entirely and still needed a targeted catch."""
+	run = 1
+	for i in range(1, len(upper_token)):
+		run = run + 1 if upper_token[i] == upper_token[i - 1] else 1
+		if run >= min_run:
+			return True
+	return False
+
+
+# Digits that a name token should never contain -- real given/surname text has none, so any
+# digit found inside one is always an OCR misread of its similar-looking letter, never genuine
+# data. Confirmed live on two separate ICAO specimen reads: MRZ "MEI" -> "ME1" and "OLIVIA" ->
+# "0LIVIA", both slipping past the composite checksum gate (names carry no checksum of their own)
+# and past the old length-only plausibility check, since neither is unusually long. Applying this
+# BEFORE the vowel/diversity filter above recovers the real name instead of just discarding the
+# whole token as unrecoverable garbage. Deliberately limited to the confusions CHAR_CONFUSIONS
+# already treats as common OCR misreads of these exact letters (not every digit -- 3/4/7/9 have
+# no correspondingly common letter confusion and guessing wrong would do more harm than leaving
+# them, which _looks_like_name_token's own checks will then correctly reject as garbage anyway).
+_DIGIT_TO_LETTER_CONFUSION = {"0": "O", "1": "I", "2": "Z", "5": "S", "6": "G", "8": "B"}
+
+
+def _fix_digit_letter_confusion(token):
+	if not token or not any(c.isdigit() for c in token):
+		return token
+	return "".join(_DIGIT_TO_LETTER_CONFUSION.get(c, c) for c in token)
 
 
 def _strip_shared_leading_noise(tokens):
@@ -317,6 +341,10 @@ def split_name_parts(surname, given_names):
 	"""
 	given_tokens = [t for t in re.split(r"\s+", (given_names or "").replace("<", " ").strip()) if t]
 	surname_tokens = [t for t in re.split(r"\s+", (surname or "").replace("<", " ").strip()) if t]
+	# Recover an OCR digit-for-letter misread (MEI -> ME1, OLIVIA -> 0LIVIA) before the vowel/
+	# diversity filter below, so a single wrong character doesn't cost the whole token.
+	given_tokens = [_fix_digit_letter_confusion(t) for t in given_tokens]
+	surname_tokens = [_fix_digit_letter_confusion(t) for t in surname_tokens]
 	# Garbage padding-turned-letters (no vowel) must be dropped BEFORE checking for a shared
 	# leading character below -- otherwise a real "KANNA"/"KMARIA" pair sharing a spurious 'K'
 	# never gets caught because a third, unrelated garbage token in the same list ("LLLL...",
@@ -553,10 +581,18 @@ def extract_mrz_from_raw_text(raw_text):
 	# 1. Look for TD3 lines (starts with P, PQ, PA, PB, etc. or contains <<)
 	for i in range(len(lines)):
 		l1 = lines[i]
+		# "<" in l1 required on the startswith("P")/ETH branches too -- confirmed live: a cloud
+		# OCR API's raw text interleaves visual page text (labels, printed field values) with the
+		# actual MRZ, unlike the Tesseract fallback below which only ever sees a pre-cropped MRZ
+		# band. A printed header like "PASPOORT KONINKRUK DER NEDERLANDEN" starts with "P" and
+		# clears the length floor after whitespace-stripping, but a real MRZ line1 always carries
+		# "<" filler (a name essentially never fills the full 39-character field exactly) -- this
+		# was matching the header as line1 and the REAL line1 as line2, scrambling the whole read
+		# even though the correct MRZ was sitting right there in the same text.
 		is_l1_mrz = (
-			(l1.startswith("P") and len(l1) >= 28) or
+			(l1.startswith("P") and len(l1) >= 28 and "<" in l1) or
 			("<<" in l1 and len(l1) >= 28) or
-			("ETH" in l1[:8] and len(l1) >= 28)
+			("ETH" in l1[:8] and len(l1) >= 28 and "<" in l1)
 		)
 		if is_l1_mrz and (i + 1 < len(lines)):
 			l2 = lines[i + 1]
@@ -919,104 +955,86 @@ def map_mrz_fields(mrz_dict: dict) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. PaddleOCR -- the primary OCR engine
+# 5. OCR.space -- the primary OCR engine
 # ─────────────────────────────────────────────────────────────────────────────
-# 2026-09-16: switched to this after a string of real-world Tesseract misreads (each fixed
-# individually below in the checksum/name-parsing logic, but each was a distinct new failure
-# mode on a new real passport) made clear that no amount of patching Tesseract's output was
-# going to close this gap on its own. PaddleOCR does real text detection (finds where the actual
-# text regions are, rather than needing a guessed crop + page-segmentation-mode assumption) and
-# includes its own document-orientation classification -- verified live against both real
-# passports on file: it read the full, untouched, un-cropped image correctly in a single pass on
-# both (one of them low-resolution, 389x259, that had needed several rounds of Tesseract-specific
-# fixes), with no custom cropping or rotation correction needed at all. Kept as the FIRST
-# strategy tried, with the entire Tesseract/PassportEye pipeline below kept intact as a fallback
-# if PaddleOCR isn't installed or errors for any reason -- not a replacement, an addition ahead
-# of it, so this can't make things worse than before if something about it doesn't hold up.
-_paddle_ocr_instance = None
+# 2026-09-16: replaced PaddleOCR (tried first 2026-09-16, briefly) with this cloud call.
+# PaddleOCR's own text detection was genuinely more capable in some cases than the Tesseract
+# pipeline below (see removed section history), but PaddlePaddle's runtime carries a ~660-700MB
+# process baseline just to be loaded at all -- confirmed unworkable on Railway's free/hobby tier
+# alongside gunicorn+worker+scheduler+redis already sharing the one container. A side-by-side
+# test against 22 public ICAO specimens plus 2 real passports found OCR.space and the self-hosted
+# Tesseract pipeline fail on genuinely DIFFERENT images (neither one is a strict upgrade) -- so
+# this is kept as the FIRST strategy tried, with the entire Tesseract/PassportEye pipeline below
+# kept intact as a fallback for whatever OCR.space misses or when no API key is configured, not a
+# replacement for it.
+#
+# Needs `ocrspace_api_key` set in site_config.json (bench set-config ocrspace_api_key <key>, or
+# via the OCRSPACE_API_KEY env var on Railway -- see docker/entrypoint.sh). Free tier is 25,000
+# requests/month, rate-limited to 500/day per IP; comfortably covers one call per onboarded
+# worker at this app's actual volume.
+_OCRSPACE_ENDPOINT = "https://api.ocr.space/parse/image"
+_OCRSPACE_MAX_UPLOAD_BYTES = 1_000_000  # free-tier file size cap
 
 
-def _get_paddle_ocr():
-	"""Lazily constructs and caches the PaddleOCR pipeline -- model loading takes a couple of
-	seconds and should happen once per worker process, not once per passport. Returns None if
-	PaddleOCR isn't installed.
+def _shrink_for_ocrspace_upload(pil_img, max_bytes=_OCRSPACE_MAX_UPLOAD_BYTES):
+	"""Re-encodes as JPEG under OCR.space's free-tier file size cap. Quality reduction first --
+	MRZ text is bold, high-contrast, monospace, and survives fairly aggressive JPEG compression
+	still legible -- dimension downscaling only as a last resort since that hits small printed
+	text harder than compression does."""
+	from PIL import Image
 
-	Configured for the smallest memory footprint that still read both real passports on file
-	correctly (measured live): the "tiny" OCRv6 detection/recognition models instead of the
-	default "medium" ones, and the document/textline orientation classifiers turned off entirely
-	(orientation is instead handled cheaply beforehand by _load_upright_image, shared with the
-	Tesseract fallback below, rather than paying for two more loaded models here).
-
-	Measured finding, worth remembering before assuming a smaller model config fixes a memory
-	problem: switching medium -> tiny models changed peak RSS from ~912MB to ~912MB -- no
-	meaningful difference. The bulk of PaddleOCR's memory cost is PaddlePaddle's own framework/
-	runtime overhead from being loaded at all (~660-700MB baseline observed), not the specific
-	model weights -- so model choice and even the input image's size are minor levers here, not
-	the fix, if the actual constraint is total available memory in the process.
-
-	enable_mkldnn=False: see the FLAGS_use_mkldnn comment on the import above for why oneDNN is
-	disabled."""
-	global _paddle_ocr_instance
-	if _paddle_ocr_instance is None and PaddleOCR is not None:
-		_paddle_ocr_instance = PaddleOCR(
-			use_doc_orientation_classify=False,
-			use_doc_unwarping=False,
-			use_textline_orientation=False,
-			text_detection_model_name="PP-OCRv6_tiny_det",
-			text_recognition_model_name="PP-OCRv6_tiny_rec",
-			enable_mkldnn=False,
-		)
-	return _paddle_ocr_instance
+	img = pil_img.convert("RGB")
+	for quality in (85, 70, 55, 40, 30):
+		buf = io.BytesIO()
+		img.save(buf, format="JPEG", quality=quality)
+		if buf.tell() <= max_bytes:
+			return buf.getvalue()
+	w, h = img.size
+	img = img.resize((int(w * 0.6), int(h * 0.6)), Image.Resampling.LANCZOS)
+	buf = io.BytesIO()
+	img.save(buf, format="JPEG", quality=60)
+	return buf.getvalue()
 
 
-# Full width, bottom MIN_...-to-100% of the (orientation-corrected) image height -- ICAO 9303
-# fixes the MRZ at the very bottom of a passport's bio-data page, so this needs no per-document
-# tuning. Generous on purpose (35% of a typical bio page comfortably includes the two MRZ lines
-# even on a wide/tall framing) since the cost of a miss is a fallback to the slower Tesseract
-# pipeline, not a wrong answer.
-_PADDLE_CROP_BOTTOM_RATIO = 0.35
+def _ocrspace_full_text(file_path):
+	"""Sends the full (orientation-corrected) image to OCR.space and returns its raw recognized
+	text, the same shape extract_mrz_from_raw_text already expects and already knows how to
+	search for MRZ-shaped lines within (it doesn't need to be handed only the MRZ; other
+	recognized page text is just harmless noise it already searches past).
 
+	Deliberately NOT cropped to a bottom MRZ band before sending -- confirmed live: cropping
+	first (copying the pattern the removed PaddleOCR call used) measurably hurt accuracy here,
+	regressing several images that read correctly uncropped. OCR.space's own text detection
+	evidently wants the surrounding page context that a tight crop throws away; unlike the
+	Tesseract fallback below, this engine was never validated against a cropped input, only a
+	full one, in the side-by-side test that justified adding it.
 
-def _paddle_ocr_full_text(file_path):
-	"""Runs PaddleOCR on the bottom slice of the (orientation-corrected) image -- full width, see
-	_PADDLE_CROP_BOTTOM_RATIO -- and returns every recognized line joined into one multi-line
-	blob, sorted top-to-bottom by its bounding box position -- the same shape
-	extract_mrz_from_raw_text already expects and already knows how to search for MRZ-shaped
-	lines within (it doesn't need to be handed only the MRZ; recognized page labels and other
-	printed text are just harmless noise it already searches past).
-
-	Cropping happens entirely in memory against a copy -- `file_path` itself is only ever read,
-	never modified, so the original upload (needed in full for the CV/photo record) is completely
-	unaffected by this. Returns None if PaddleOCR isn't installed or the call fails for any
-	reason (including, as observed live, the OS killing the process outright for memory -- a
-	SIGKILL can't be caught by this try/except, so that failure surfaces as the worker dying
-	rather than a logged error here; see this function's own memory-footprint notes on
-	_get_paddle_ocr) -- the caller falls back to the rest of the pipeline either way."""
-	ocr = _get_paddle_ocr()
-	if ocr is None:
+	`file_path` itself is only ever read, never modified, so the original upload (needed in full
+	for the CV/photo record) is completely unaffected by this. Returns None if no API key is
+	configured, the request fails, or OCR.space itself reports a processing error -- the caller
+	falls back to the rest of the pipeline either way."""
+	api_key = frappe.conf.get("ocrspace_api_key")
+	if not api_key:
 		return None
 	try:
-		import numpy as np
-
 		img = _load_upright_image(file_path)
-		w, h = img.size
-		crop = img.crop((0, int(h * (1 - _PADDLE_CROP_BOTTOM_RATIO)), w, h))
-		arr = np.array(crop)
+		payload = _shrink_for_ocrspace_upload(img)
 
-		lines = []
-		for res in ocr.predict(arr):
-			payload = res.json.get("res", {}) if hasattr(res, "json") else {}
-			texts = payload.get("rec_texts") or []
-			polys = payload.get("rec_polys")
-			if polys is not None and len(polys) == len(texts):
-				ys = [min(point[1] for point in poly) for poly in polys]
-			else:
-				ys = list(range(len(texts)))
-			lines.extend(zip(ys, texts))
-		lines.sort(key=lambda pair: pair[0])
-		return "\n".join(text for _y, text in lines)
+		resp = requests.post(
+			_OCRSPACE_ENDPOINT,
+			files={"file": ("passport.jpg", payload, "image/jpeg")},
+			data={"apikey": api_key, "OCREngine": 2, "language": "eng", "scale": "true", "isOverlayRequired": "false"},
+			timeout=30,
+		)
+		if resp.status_code != 200:
+			return None
+		data = resp.json()
+		if data.get("IsErroredOnProcessing"):
+			return None
+		results = data.get("ParsedResults") or []
+		return results[0].get("ParsedText") if results else None
 	except Exception:
-		frappe.log_error(title="PaddleOCR passport read failed", message=frappe.get_traceback())
+		frappe.log_error(title="OCR.space passport read failed", message=frappe.get_traceback())
 		return None
 
 
@@ -1048,6 +1066,31 @@ def _mrz_score(parsed):
 		return bool(isinstance(entry, dict) and entry.get("valid"))
 
 	return sum([ok("passport_number"), ok("date_of_birth"), ok("expiry_date")])
+
+
+# checksum_validation stores the corrected value under "clean" for passport_number but
+# "corrected" for the two date fields -- an inherited inconsistency from parse_mrz_td3/parse_mrz_td1,
+# not something to unify here (out of scope for a comparison helper).
+_CHECKSUM_VALUE_KEYS = {"passport_number": "clean", "date_of_birth": "corrected", "expiry_date": "corrected"}
+
+
+def _checksummed_values_conflict(a, b):
+	"""True if two independently fully-checksum-valid MRZ reads disagree on any of the three
+	checksummed field VALUES (not just whether each individually passed). Both having passed
+	only means each satisfies its own checksum equation -- verify_and_correct_checksum's single-
+	character substitution is a guess that happens to balance the equation, not a guarantee it
+	recovered the real digit, so two attempts CAN both "validate" while reporting different
+	values for the same real-world field. See _consider's own comment for how this is used."""
+	cv_a = (a or {}).get("checksum_validation") or {}
+	cv_b = (b or {}).get("checksum_validation") or {}
+	for field, value_key in _CHECKSUM_VALUE_KEYS.items():
+		entry_a, entry_b = cv_a.get(field), cv_b.get(field)
+		if not (isinstance(entry_a, dict) and isinstance(entry_b, dict)):
+			continue
+		val_a, val_b = entry_a.get(value_key), entry_b.get(value_key)
+		if val_a and val_b and val_a != val_b:
+			return True
+	return False
 
 
 # Confirmed live on a real, genuinely upright passport scan: Tesseract's OSD suggested a 180-
@@ -1150,14 +1193,21 @@ def _candidate_mrz_crops(pil_img):
 
 def _name_plausibility_score(parsed):
 	"""1 if the given/surname split looks like real, separate names; 0 if any token is
-	suspiciously long (see MAX_PLAUSIBLE_NAME_TOKEN_LENGTH). Checksums can't tell two equally
-	"fully valid" MRZ reads apart when they disagree only on how the name field was split -- this
-	is the tiebreaker used to prefer whichever crop/attempt happened to OCR the '<' filler between
-	given names cleanly."""
+	suspiciously long (see MAX_PLAUSIBLE_NAME_TOKEN_LENGTH) or fails the same shape check
+	(_looks_like_name_token) split_name_parts already uses to filter garbage tokens up front.
+	That second check matters here too: a short-or-medium-length token can still be pure OCR
+	noise ("Lkkkklcclelce" is 13 characters, under the length cap, but no real name repeats a
+	character 4 times running) -- confirmed live, this previously scored 1 and stopped the search
+	before a cleaner crop/attempt ever got a chance. Checksums can't tell two equally "fully
+	valid" MRZ reads apart when they disagree only on how the name field was split -- this is the
+	tiebreaker used to prefer whichever crop/attempt happened to OCR the '<' filler between given
+	names cleanly."""
 	if not parsed:
 		return -1
 	names = [n for n in (parsed.get("first_name"), parsed.get("middle_name"), parsed.get("last_name")) if n]
 	if any(len(n) > MAX_PLAUSIBLE_NAME_TOKEN_LENGTH for n in names):
+		return 0
+	if any(not _looks_like_name_token(n) for n in names):
 		return 0
 	return 1
 
@@ -1170,16 +1220,22 @@ def parse_passport_mrz(file_path: str) -> dict:
 	Given a filesystem path to a passport scan/photo/PDF, extracts MRZ and returns
 	Applicant field updates. Tries strategies in order of accuracy/cost:
 	1. Text stream extraction (PyMuPDF / pypdf) -- a real text layer needs no OCR guessing at all.
-	2. PaddleOCR on the full, untouched image -- the primary OCR engine (see its own section
-	   comment for why).
+	2. OCR.space on the full (orientation-corrected) image -- the primary OCR engine (see its
+	   own section comment for why it isn't pre-cropped).
 	3. PassportEye's own MRZ box locator, when it finds one.
 	4. Our own Tesseract candidate-crop pipeline (orientation-corrected full image, then several
-	   MRZ-band crops) -- fallback of last resort if PaddleOCR isn't installed or didn't produce
-	   a usable read.
+	   MRZ-band crops) -- fallback of last resort, only reached when steps 2/3 didn't already
+	   produce a clean, confident hit.
 	Stops as soon as a result is BOTH fully checksum-valid (passport number, DOB, expiry all
 	agree) AND has a plausible name split; a fully-valid-but-implausible-name result keeps trying
 	further candidates first, since a name typo can't be caught by checksums the way a digit
-	field can -- only a differently-OCR'd attempt of the same line can fix it.
+	field can -- only a differently-OCR'd attempt of the same line can fix it. Two independently
+	checksum-valid reads that disagree on the actual digits (each strategy runs its own single-
+	character checksum-correction guess, so two attempts CAN both "validate" while reading
+	different values) force needs_passport_review rather than silently trusting whichever ran
+	last -- deliberately NOT extended to comparing name values the same way, since that produced
+	false positives on real, correctly-read photos once step 4's dozen-or-so attempts are in play
+	(see _consider's own comment).
 	If nothing validates fully, returns the best partial match found (map_mrz_fields flags it
 	needs_passport_review and withholds the name fields, which have no checksum of their own).
 	Never raises exceptions — gracefully logs and returns empty dict on failure.
@@ -1189,22 +1245,48 @@ def parse_passport_mrz(file_path: str) -> dict:
 
 	best_result, best_score = None, -1  # best PARTIAL match (score < 3), for the final fallback
 	best_valid, best_valid_names = None, -1  # best FULLY checksum-valid match, by name plausibility
+	saw_conflict = False  # two independently "valid" attempts disagreed on a checksummed value
 
 	def _consider(parsed):
 		"""Records `parsed` as a candidate. Returns True once it's good enough (fully checksum-
 		valid AND a plausible name split) that trying further candidates isn't worth it."""
-		nonlocal best_result, best_score, best_valid, best_valid_names
+		nonlocal best_result, best_score, best_valid, best_valid_names, saw_conflict
 		if not parsed:
 			return False
 		score = _mrz_score(parsed)
 		if score == 3:
 			names_score = _name_plausibility_score(parsed)
+			if best_valid is not None and _checksummed_values_conflict(best_valid, parsed):
+				# Both attempts satisfy the ICAO checksum, but disagree on the actual digits --
+				# verify_and_correct_checksum's single-character substitution only guarantees the
+				# checksum equation balances, not that the guessed correction is the real one, so
+				# two attempts CAN both pass while reading different underlying values. A nicer-
+				# looking name on the later attempt isn't good evidence its digits are the correct
+				# ones -- flagging beats silently trusting whichever attempt happened to run last.
+				#
+				# Deliberately NOT extended to compare NAME values the same way (tried live,
+				# reverted): once step 4 below runs unconditionally, a real, correctly-read photo
+				# can still turn up a spurious-but-checksum-valid misread on SOME crop out of the
+				# ~12 tried (more attempts = more chances for one fluke to validate), which then
+				# "conflicts" with the correct answer and forces an unwarranted review flag on a
+				# passport that was actually read correctly the first time. A digit conflict is
+				# rare and meaningful; a name-shape disagreement across a dozen brute-force OCR
+				# attempts is common enough to be noise, not signal.
+				saw_conflict = True
 			if names_score > best_valid_names:
 				best_valid, best_valid_names = parsed, names_score
 			return names_score == 1
 		if score > best_score:
 			best_result, best_score = parsed, score
 		return False
+
+	def _finalize_valid():
+		"""Maps best_valid to Applicant fields, forcing needs_passport_review when a conflicting
+		checksum-valid reading was seen anywhere in the search -- see _consider's own comment."""
+		result = map_mrz_fields(best_valid)
+		if saw_conflict:
+			result["needs_passport_review"] = 1
+		return result
 
 	# 1. If PDF document, extract text stream directly.
 	if file_path.lower().endswith(".pdf"):
@@ -1213,14 +1295,23 @@ def parse_passport_mrz(file_path: str) -> dict:
 
 			raw_text = extract_text_from_pdf(file_path)
 			if raw_text and _consider(extract_mrz_from_raw_text(raw_text)):
-				return map_mrz_fields(best_valid)
+				return _finalize_valid()
 		except Exception:
 			pass
 
-	# 2. PaddleOCR on the full, untouched image -- see its section comment above.
-	paddle_text = _paddle_ocr_full_text(file_path)
-	if paddle_text and _consider(extract_mrz_from_raw_text(paddle_text)):
-		return map_mrz_fields(best_valid)
+	# 2. OCR.space on the full image -- see its section comment above. Deliberately does NOT
+	# short-circuit here (see its own section comment). Tried making this ALWAYS fall through to
+	# the Tesseract corroboration in step 4 even after a clean hit here (reverted, 2026-09-16):
+	# across step 4's ~12 crop/preprocessing/PSM combinations, a real, correctly-photographed
+	# passport can still turn up an occasional spurious-but-checksum-valid misread on SOME
+	# attempt out of that many -- confirmed live, this forced an unwarranted needs_passport_review
+	# on a real Ethiopian passport photo that OCR.space had already read perfectly. A short-
+	# circuit on a clean single-shot success stays the right default; see _checksummed_values_conflict
+	# for the narrower, still-active safety net that catches disagreement in the cases where step 4
+	# genuinely does still run (steps 2/3 didn't get a clean hit on their own).
+	ocrspace_text = _ocrspace_full_text(file_path)
+	if ocrspace_text and _consider(extract_mrz_from_raw_text(ocrspace_text)):
+		return _finalize_valid()
 
 	# 3. PassportEye's own locator -- re-run its raw OCR text through our own checksum-aware
 	# parser rather than trusting its dict directly (it has no equivalent composite gate, and
@@ -1230,14 +1321,15 @@ def parse_passport_mrz(file_path: str) -> dict:
 			mrz = read_mrz(file_path)
 			raw_text = mrz.to_dict().get("raw_text") if mrz else None
 			if raw_text and _consider(extract_mrz_from_raw_text(raw_text)):
-				return map_mrz_fields(best_valid)
+				return _finalize_valid()
 		except Exception:
 			pass
 
-	# 4. Our own Tesseract candidate-crop pipeline -- keeps going even after a fully-valid read, as long as
-	# its name split still looks implausible, because a different crop/scale/preprocessing/PSM
-	# combination can OCR the exact same line more cleanly and recover a correct name split or a
-	# checksummed field an earlier attempt missed.
+	# 4. Our own Tesseract candidate-crop pipeline -- keeps going even after a fully-valid read,
+	# as long as its name split still looks implausible, because a different crop/scale/
+	# preprocessing/PSM combination can OCR the exact same line more cleanly and recover a
+	# correct name split or a checksummed field an earlier attempt missed. Only reached at all
+	# when steps 2/3 didn't already produce a clean, confident hit.
 	try:
 		img = _load_upright_image(file_path)
 		done = False
@@ -1252,7 +1344,7 @@ def parse_passport_mrz(file_path: str) -> dict:
 		frappe.log_error(title="Passport MRZ candidate-crop pipeline failed", message=frappe.get_traceback())
 
 	if best_valid:
-		result = map_mrz_fields(best_valid)
+		result = _finalize_valid()
 		if best_valid_names == 0:
 			# Every checksummed field agrees, but no attempt produced a plausible name split --
 			# still the most useful result available (names visibly need a quick fix, everything

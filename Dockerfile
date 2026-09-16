@@ -53,22 +53,6 @@ COPY --chown=frappe:frappe . apps/agency_tracking
 RUN ./env/bin/pip install --no-cache-dir -e apps/agency_tracking \
     && printf '\n%s\n' agency_tracking >> sites/apps.txt
 
-# Pre-download PaddleOCR's model files into the image at build time, as the frappe user so they
-# land in the same home directory (~/.paddlex) the running app worker will read from --
-# otherwise the first real passport upload in production would pay for this download itself,
-# against Railway's network rather than the build's. Must match passport_parser.py's
-# _get_paddle_ocr() exactly (model names + which classifiers are enabled), or this pre-fetch
-# caches the wrong files and the runtime call downloads the right ones anyway on first use --
-# tiny OCRv6 models with orientation classifiers off: measured as the smallest footprint that
-# still read both real passports tested against correctly (see that function's own comment for
-# why "smallest" here saves barely anything -- PaddlePaddle's own framework overhead, not the
-# model choice, dominates memory use; a memory-constrained host needs more RAM allocated to it,
-# not a smaller model). FLAGS_use_mkldnn=false / enable_mkldnn=False: oneDNN crashes
-# PaddlePaddle's inference executor on some CPU/library combinations (confirmed in development),
-# so it's disabled globally rather than risking that in production for a modest inference-speed
-# gain on a task that's already run as a background job, not on the request path.
-RUN FLAGS_use_mkldnn=false ./env/bin/python -c "from paddleocr import PaddleOCR; PaddleOCR(use_doc_orientation_classify=False, use_doc_unwarping=False, use_textline_orientation=False, text_detection_model_name='PP-OCRv6_tiny_det', text_recognition_model_name='PP-OCRv6_tiny_rec', enable_mkldnn=False)"
-
 # Compile Frappe Desk static assets
 RUN bench build --app frappe
 
