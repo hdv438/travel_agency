@@ -276,6 +276,28 @@ def _looks_like_name_token(token):
 	return True
 
 
+def _strip_shared_leading_noise(tokens):
+	"""If 2+ given-name tokens ALL start with the exact same character, and stripping it from
+	every one of them still leaves real-looking names, strip it -- that character is standing in
+	for a misread delimiter, not a genuine shared initial.
+
+	Confirmed live on an ICAO specimen document: "<<ANNA<MARIA<<<..." OCR'd as
+	"<K<KANNA<KMARIA<...", turning both given names into "Kanna"/"Kmaria". A single name
+	starting with a letter like K/C/X is completely ordinary (plenty of real names do), so this
+	deliberately does NOT touch a lone token, or when tokens disagree on their leading
+	character -- only when EVERY token in the field shares the identical anomaly, which is a
+	shared-corruption-source signal a coincidence can't easily produce, is it safe to strip."""
+	if len(tokens) < 2:
+		return tokens
+	leading = {t[0] for t in tokens if t}
+	if len(leading) != 1:
+		return tokens
+	stripped = [t[1:] for t in tokens]
+	if all(_looks_like_name_token(t) for t in stripped):
+		return stripped
+	return tokens
+
+
 def split_name_parts(surname, given_names):
 	"""Split a passport name into (first, middle, last) using Ethiopian / ICAO ordering.
 
@@ -295,8 +317,14 @@ def split_name_parts(surname, given_names):
 	"""
 	given_tokens = [t for t in re.split(r"\s+", (given_names or "").replace("<", " ").strip()) if t]
 	surname_tokens = [t for t in re.split(r"\s+", (surname or "").replace("<", " ").strip()) if t]
+	# Garbage padding-turned-letters (no vowel) must be dropped BEFORE checking for a shared
+	# leading character below -- otherwise a real "KANNA"/"KMARIA" pair sharing a spurious 'K'
+	# never gets caught because a third, unrelated garbage token in the same list ("LLLL...",
+	# itself already rejected by _looks_like_name_token on its own merits) doesn't share it,
+	# breaking the "every token agrees" requirement that makes stripping safe.
 	given_tokens = [t for t in given_tokens if _looks_like_name_token(t)]
 	surname_tokens = [t for t in surname_tokens if _looks_like_name_token(t)]
+	given_tokens = _strip_shared_leading_noise(given_tokens)
 	seq = given_tokens + surname_tokens
 	if not seq:
 		return "", None, None
