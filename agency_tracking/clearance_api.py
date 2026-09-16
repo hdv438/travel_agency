@@ -623,6 +623,49 @@ def list_assigned_steps(placement=None):
 	return list_my_clearance_steps(placement=placement)
 
 
+@frappe.whitelist()
+def list_my_todos(status="Open", **kwargs):
+	"""The calling user's own To-Do queue -- both Clearance Step ToDos (per-role broadcasts for
+	the six country+step roles, or an exclusive assignment for Clearance Officer/Ticketer) and
+	Placement ToDos (ticketing/departure). Always `frappe.session.user`, same as
+	notification_feed's endpoints -- never accepts a user param, so nobody can page through
+	someone else's queue.
+
+	`status` defaults to "Open" (the actual open task list); pass "" or None for every status
+	(Open/Closed/Cancelled) e.g. for a "my task history" view. Filtering by allocated_to=self
+	already scopes this to the caller's own rows, so frappe.get_all (no permission query) is
+	used -- there is nothing here to leak beyond what the row itself already says."""
+	filters = {"allocated_to": frappe.session.user}
+	if status:
+		filters["status"] = status
+	rows = frappe.get_all(
+		"ToDo",
+		filters=filters,
+		fields=["name", "reference_type", "reference_name", "description", "status", "creation"],
+		order_by="creation desc",
+	)
+	step_names = [r.reference_name for r in rows if r.reference_type == "Clearance Step"]
+	steps_by_name = {}
+	if step_names:
+		for s in frappe.get_all(
+			"Clearance Step",
+			filters={"name": ["in", step_names]},
+			fields=["name", "step_type", "status", "placement", "is_mandatory"],
+		):
+			steps_by_name[s.name] = s
+
+	for row in rows:
+		if row.reference_type == "Clearance Step":
+			step = steps_by_name.get(row.reference_name)
+			row["placement"] = step.placement if step else None
+			row["step_type"] = step.step_type if step else None
+			row["step_status"] = step.status if step else None
+			row["is_mandatory"] = step.is_mandatory if step else None
+		else:
+			row["placement"] = row.reference_name if row.reference_type == "Placement" else None
+	return rows
+
+
 # ── Taeshir / Injaz attempts ───────────────────────────────────────────────────
 # Injaz is data captured inside the Taeshir Clearance Step, now as a table of attempts
 # (Injaz Attempt child rows). At most one row is "Active" at a time -- the current appointment

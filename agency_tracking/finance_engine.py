@@ -782,4 +782,35 @@ def is_assigned_to_placement(user, placement_name):
 	return bool(has_clearance_todo or has_placement_todo)
 
 
-TRANSITION_SIDE_EFFECTS[("Placement", "Departed")] = accrue_commission
+def _on_placement_departed(placement, from_status=None):
+	"""TRANSITION_SIDE_EFFECTS only holds one handler per (doctype, status) key -- this wraps
+	accrue_commission rather than registering a second handler at the same key, which would
+	silently replace it (see clearance_engine.py's own comment on this same single-slot design).
+
+	Also closes the "Confirm departure..." Placement ToDo(s) here rather than inside
+	accrue_commission itself: accrue_commission is also called directly, standalone, from
+	finance_api.py for an early commission trigger *before* a Placement has actually reached
+	Departed (see its own comment, "bill sooner than Departed") -- closing the departure task
+	from inside accrue_commission would have marked it done on that early-billing path too, even
+	though nobody had actually confirmed the applicant departed yet. This wrapper only runs on
+	the real Ticketed -> Departed transition, so the ToDo only closes when departure is genuine.
+
+	The two are independently guarded -- a commission-accrual failure (e.g. a missing FX/
+	commission-rate config) must not also block the ToDo close, or this wrapper would introduce
+	a coupling that didn't exist before: today a failed accrue_commission is already just logged
+	and swallowed by transition()'s own outer try/except (real failures need a human to notice
+	and resolve manually, per its comment above), and departure confirmation closing its own task
+	shouldn't start depending on billing having gone through cleanly."""
+	from agency_tracking.clearance_engine import _close_placement_todos
+
+	try:
+		accrue_commission(placement, from_status=from_status)
+	except Exception:
+		frappe.log_error(
+			title="accrue_commission failed on Departed",
+			message=f"{placement.name}: {frappe.get_traceback()}",
+		)
+	_close_placement_todos(placement.name)
+
+
+TRANSITION_SIDE_EFFECTS[("Placement", "Departed")] = _on_placement_departed

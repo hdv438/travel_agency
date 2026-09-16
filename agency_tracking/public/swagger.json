@@ -2155,6 +2155,13 @@
             "in": "formData",
             "type": "string",
             "required": false
+          },
+          {
+            "name": "override_reason",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Manager/Admin/System Manager only: push the Stamp through despite an unpaid Wakala fee, with a mandatory written reason logged to the audit trail (Process Event)."
           }
         ],
         "responses": {
@@ -8466,6 +8473,82 @@
             "sessionCookie": []
           }
         ]
+      }
+    },
+    "/api/method/agency_tracking.clearance_api.list_my_todos": {
+      "post": {
+        "tags": [
+          "Clearance Steps"
+        ],
+        "summary": "List the current user's To-Do queue",
+        "description": "The calling user's own ToDo rows (Clearance Step assignments/broadcasts and Placement ticketing/departure tasks), human-readable (description embeds the applicant's real name, not just the raw Placement/Clearance Step ID). Always frappe.session.user -- never accepts a user param.",
+        "x-roles": [
+          "Any authenticated staff user (own ToDo rows only)"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Defaults to \"Open\". Pass an empty string for every status (Open/Closed/Cancelled)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "reference_type": {
+                        "type": "string"
+                      },
+                      "reference_name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "creation": {
+                        "type": "string"
+                      },
+                      "placement": {
+                        "type": "string"
+                      },
+                      "step_type": {
+                        "type": "string"
+                      },
+                      "step_status": {
+                        "type": "string"
+                      },
+                      "is_mandatory": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "417": {
+            "description": "Validation error"
+          }
+        }
       }
     }
   },
