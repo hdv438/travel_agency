@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         mariadb-client redis-server \
         wkhtmltopdf xfonts-75dpi xfonts-base \
         tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd \
+        libgl1 libglib2.0-0 \
         supervisor cron \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
@@ -51,6 +52,16 @@ COPY --chown=frappe:frappe . apps/agency_tracking
 # Install python dependencies from pyproject.toml and register app
 RUN ./env/bin/pip install --no-cache-dir -e apps/agency_tracking \
     && printf '\n%s\n' agency_tracking >> sites/apps.txt
+
+# Pre-download PaddleOCR's model files (~30-50MB) into the image at build time, as the frappe
+# user so they land in the same home directory (~/.paddlex) the running app worker will read
+# from -- otherwise the first real passport upload in production would pay for this download
+# itself, against Railway's network rather than the build's. FLAGS_use_mkldnn=false /
+# enable_mkldnn=False: oneDNN crashes PaddlePaddle's inference executor on some CPU/library
+# combinations (confirmed in development), so it's disabled globally rather than risking that
+# in production for a modest inference-speed gain on a task that's already run as a background
+# job, not on the request path.
+RUN FLAGS_use_mkldnn=false ./env/bin/python -c "from paddleocr import PaddleOCR; PaddleOCR(use_doc_orientation_classify=True, use_doc_unwarping=False, use_textline_orientation=True, lang='en', enable_mkldnn=False)"
 
 # Compile Frappe Desk static assets
 RUN bench build --app frappe

@@ -20,6 +20,19 @@ try:
 except ImportError:
 	pycountry = None
 
+# oneDNN (CPU inference acceleration) crashes PaddlePaddle's PIR executor on some CPU/library
+# combinations ("ConvertPirAttribute2RuntimeAttribute not support ..." from onednn_instruction.cc,
+# confirmed live) -- disabled globally before PaddleOCR is ever constructed, trading a slower
+# inference for one that reliably doesn't crash. Set as an env var (belt) in addition to the
+# constructor's own enable_mkldnn=False (suspenders) since the failing code path is inside
+# PaddlePaddle's own executor, not something confirmed scoped only to the flag PaddleOCR exposes.
+os.environ.setdefault("FLAGS_use_mkldnn", "false")
+
+try:
+	from paddleocr import PaddleOCR
+except ImportError:
+	PaddleOCR = None
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. ISO 3166-1 Alpha-3 Country Mapping & Constants
 # ─────────────────────────────────────────────────────────────────────────────
@@ -878,7 +891,71 @@ def map_mrz_fields(mrz_dict: dict) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Robust image normalization + candidate MRZ localization
+# 5. PaddleOCR -- the primary OCR engine
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-09-16: switched to this after a string of real-world Tesseract misreads (each fixed
+# individually below in the checksum/name-parsing logic, but each was a distinct new failure
+# mode on a new real passport) made clear that no amount of patching Tesseract's output was
+# going to close this gap on its own. PaddleOCR does real text detection (finds where the actual
+# text regions are, rather than needing a guessed crop + page-segmentation-mode assumption) and
+# includes its own document-orientation classification -- verified live against both real
+# passports on file: it read the full, untouched, un-cropped image correctly in a single pass on
+# both (one of them low-resolution, 389x259, that had needed several rounds of Tesseract-specific
+# fixes), with no custom cropping or rotation correction needed at all. Kept as the FIRST
+# strategy tried, with the entire Tesseract/PassportEye pipeline below kept intact as a fallback
+# if PaddleOCR isn't installed or errors for any reason -- not a replacement, an addition ahead
+# of it, so this can't make things worse than before if something about it doesn't hold up.
+_paddle_ocr_instance = None
+
+
+def _get_paddle_ocr():
+	"""Lazily constructs and caches the PaddleOCR pipeline -- model loading takes a couple of
+	seconds and should happen once per worker process, not once per passport. Returns None if
+	PaddleOCR isn't installed. enable_mkldnn=False: see the FLAGS_use_mkldnn comment on the
+	import above for why oneDNN is disabled."""
+	global _paddle_ocr_instance
+	if _paddle_ocr_instance is None and PaddleOCR is not None:
+		_paddle_ocr_instance = PaddleOCR(
+			use_doc_orientation_classify=True,
+			use_doc_unwarping=False,
+			use_textline_orientation=True,
+			lang="en",
+			enable_mkldnn=False,
+		)
+	return _paddle_ocr_instance
+
+
+def _paddle_ocr_full_text(file_path):
+	"""Runs PaddleOCR on the given image directly and returns every recognized line joined into
+	one multi-line blob, sorted top-to-bottom by its bounding box position -- the same shape
+	extract_mrz_from_raw_text already expects and already knows how to search for MRZ-shaped
+	lines within (it doesn't need to be handed only the MRZ; recognized page labels and other
+	printed text are just harmless noise it already searches past). Returns None if PaddleOCR
+	isn't installed or the call fails for any reason -- the caller falls back to the rest of the
+	pipeline either way."""
+	ocr = _get_paddle_ocr()
+	if ocr is None:
+		return None
+	try:
+		lines = []
+		for res in ocr.predict(file_path):
+			payload = res.json.get("res", {}) if hasattr(res, "json") else {}
+			texts = payload.get("rec_texts") or []
+			polys = payload.get("rec_polys")
+			if polys is not None and len(polys) == len(texts):
+				ys = [min(point[1] for point in poly) for poly in polys]
+			else:
+				ys = list(range(len(texts)))
+			lines.extend(zip(ys, texts))
+		lines.sort(key=lambda pair: pair[0])
+		return "\n".join(text for _y, text in lines)
+	except Exception:
+		frappe.log_error(title="PaddleOCR passport read failed", message=frappe.get_traceback())
+		return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Robust image normalization + candidate MRZ localization (Tesseract fallback)
 # ─────────────────────────────────────────────────────────────────────────────
 # Why this exists: PassportEye locates the MRZ by scanning the whole image for a "long, thin,
 # high-contrast horizontal text band" (a contour heuristic). On a clean, pre-cropped MRZ strip
@@ -1020,17 +1097,19 @@ def _name_plausibility_score(parsed):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Master Passport MRZ File Parser
+# 7. Master Passport MRZ File Parser
 # ─────────────────────────────────────────────────────────────────────────────
 def parse_passport_mrz(file_path: str) -> dict:
 	"""
 	Given a filesystem path to a passport scan/photo/PDF, extracts MRZ and returns
 	Applicant field updates. Tries strategies in order of accuracy/cost:
 	1. Text stream extraction (PyMuPDF / pypdf) -- a real text layer needs no OCR guessing at all.
-	2. PassportEye's own MRZ box locator, when it finds one.
-	3. Our own candidate-crop pipeline (orientation-corrected full image, then several MRZ-band
-	   crops) -- this is what makes a full, uncropped passport photo reliable without needing the
-	   frontend to pre-crop to the MRZ, and without needing PassportEye's detector to succeed.
+	2. PaddleOCR on the full, untouched image -- the primary OCR engine (see its own section
+	   comment for why).
+	3. PassportEye's own MRZ box locator, when it finds one.
+	4. Our own Tesseract candidate-crop pipeline (orientation-corrected full image, then several
+	   MRZ-band crops) -- fallback of last resort if PaddleOCR isn't installed or didn't produce
+	   a usable read.
 	Stops as soon as a result is BOTH fully checksum-valid (passport number, DOB, expiry all
 	agree) AND has a plausible name split; a fully-valid-but-implausible-name result keeps trying
 	further candidates first, since a name typo can't be caught by checksums the way a digit
@@ -1072,7 +1151,12 @@ def parse_passport_mrz(file_path: str) -> dict:
 		except Exception:
 			pass
 
-	# 2. PassportEye's own locator -- re-run its raw OCR text through our own checksum-aware
+	# 2. PaddleOCR on the full, untouched image -- see its section comment above.
+	paddle_text = _paddle_ocr_full_text(file_path)
+	if paddle_text and _consider(extract_mrz_from_raw_text(paddle_text)):
+		return map_mrz_fields(best_valid)
+
+	# 3. PassportEye's own locator -- re-run its raw OCR text through our own checksum-aware
 	# parser rather than trusting its dict directly (it has no equivalent composite gate, and
 	# would otherwise hand back an un-validated guess as if it were confirmed).
 	if read_mrz:
@@ -1084,7 +1168,7 @@ def parse_passport_mrz(file_path: str) -> dict:
 		except Exception:
 			pass
 
-	# 3. Our own candidate-crop pipeline -- keeps going even after a fully-valid read, as long as
+	# 4. Our own Tesseract candidate-crop pipeline -- keeps going even after a fully-valid read, as long as
 	# its name split still looks implausible, because a different crop/scale/preprocessing/PSM
 	# combination can OCR the exact same line more cleanly and recover a correct name split or a
 	# checksummed field an earlier attempt missed.
