@@ -80,6 +80,14 @@ def _log_stage_transaction(
 
 @frappe.whitelist()
 def log_stage_expense(amount=None, currency=None, description=None, placement=None, applicant=None, stage=None, stage_logged_at=None, **kwargs):
+	"""Ad-hoc expense logging, still the right endpoint for reschedule fees, general office
+	expenses, or anything else not covered by a corridor's known fees.
+
+	2026-09-19: do NOT use this with stage set to a clearance step type (LMIS Clearance/Kuwait
+	LMIS/Telesign/Taeshir/Embassy/Kuwait Embassy) -- those costs are now known in advance
+	(Corridor Definition.known_fees) and get auto-summed with ticket_cost into a single already-
+	Approved expense the moment placement_api.record_ticket_details is called. A manual log here
+	for one of those stages would double-count it."""
 	amount = amount or kwargs.get("amount_original") or kwargs.get("amount_birr")
 	currency = currency or kwargs.get("currency_original") or "ETB"
 	description = description or kwargs.get("reference_text") or kwargs.get("remarks") or "Expense"
@@ -99,6 +107,8 @@ def log_stage_expense(amount=None, currency=None, description=None, placement=No
 
 @frappe.whitelist()
 def log_stage_income(amount=None, currency=None, description=None, placement=None, applicant=None, stage=None, stage_logged_at=None, **kwargs):
+	"""Same shape/permissions as log_stage_expense -- see its docstring for the same clearance-
+	step-cost caveat (known fees are auto-logged as Expense, not Income, at ticketing time)."""
 	amount = amount or kwargs.get("amount_original") or kwargs.get("amount_birr")
 	currency = currency or kwargs.get("currency_original") or "ETB"
 	description = description or kwargs.get("reference_text") or kwargs.get("remarks") or "Income"

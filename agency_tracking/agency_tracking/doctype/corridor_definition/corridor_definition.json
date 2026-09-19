@@ -7,7 +7,8 @@
  "engine": "InnoDB",
  "field_order": [
   "destination_country",
-  "steps"
+  "steps",
+  "known_fees"
  ],
  "fields": [
   {
@@ -26,11 +27,18 @@
    "label": "Steps",
    "options": "Corridor Step",
    "reqd": 1
+  },
+  {
+   "description": "Fixed, known-in-advance corridor fees (LMIS, Insurance, Taeshir, Injaz, Wakala, Kuwait LMIS, Police Ashara) -- set the ones that don't apply here to 0. Summed with ticket_cost into a single Approved Expense transaction the moment the Ticketer records a ticket (placement_api.record_ticket_details) -- no separate manual income/expense logging per clearance step anymore.",
+   "fieldname": "known_fees",
+   "fieldtype": "Table",
+   "label": "Known Fees",
+   "options": "Corridor Known Fee"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-25 00:00:00.000000",
+ "modified": "2026-09-19 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agency Tracking",
  "name": "Corridor Definition",

@@ -304,17 +304,20 @@ def advance_placement(placement_name=None, new_status=None, override_reason=None
 
 @frappe.whitelist()
 def record_ticket_details(placement_name=None, ticket_number=None, flight_date=None, ticket_cost=None, currency=None, **kwargs):
-	"""Ticketer role. ticket_cost (if given) auto-logs a Pending Applicant Transaction expense
-	-- same pattern as clearance-step payments, everything money-related feeds the one Finance
-	ledger.
+	"""Ticketer role. ticket_cost, together with this corridor's known_fees (LMIS/Insurance/
+	Taeshir/Injaz/Wakala/Kuwait LMIS/Police Ashara -- Corridor Definition.known_fees, set to 0 for
+	whichever don't apply), auto-logs ONE already-Approved Applicant Transaction expense the first
+	time this is called for a placement (2026-09-19 product decision: those fees are known in
+	advance, so there's no need for a Clearance Officer to separately hand-log them stage by stage
+	via finance_api.log_stage_expense the way ad-hoc costs still are -- and no need for Finance to
+	separately approve a system-computed total). Re-saving ticket details later (e.g. correcting
+	the ticket number) does NOT re-log -- see Placement.corridor_fees_logged.
 
-	2026-08-30 fix (backend-issues #05): ticket_number/flight_date are pure logistics fields with
-	no FX dependency -- the cost-logging sub-step now runs inside its own DB savepoint, so a
-	missing FX rate for `currency` only unwinds the failed expense insert, not the ticket fields
-	saved just above (which is the doc.save() call still pending in the same transaction, same
-	as it always was -- only the failure boundary changed). The cost log is best-effort from
-	here on: failure is reported back to the caller as a warning, not a fatal error for the
-	whole call."""
+	2026-08-30 fix (backend-issues #05, still applies): ticket_number/flight_date are pure
+	logistics fields with no FX dependency -- the cost-logging sub-step runs inside its own DB
+	savepoint, so a missing FX rate only unwinds the failed expense insert, not the ticket fields
+	saved just above. The cost log is best-effort from here on: failure is reported back to the
+	caller as a warning, not a fatal error for the whole call."""
 	if not placement_name:
 		frappe.throw("placement_name is required.", frappe.ValidationError)
 	if not ticket_number:
@@ -326,32 +329,79 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	assert_placement_not_terminal(placement)
 
+	from decimal import Decimal
+
+	from frappe.utils import flt
+
+	from agency_tracking.corridor_engine import get_corridor_known_fees_total
+	from agency_tracking.finance_engine import get_fx_rate
+
+	# Validated BEFORE anything is saved -- a bad currency param is a caller input error, not a
+	# transient system-dependency failure like a missing FX rate (that one's still soft/best-
+	# effort below), so it should reject the whole call cleanly with no partial side effects
+	# rather than leave ticket_number/flight_date persisted under a call that then errors out.
+	fee_total, fee_currency = get_corridor_known_fees_total(placement.destination_country)
+	if fee_currency and currency and currency != fee_currency:
+		frappe.throw(
+			f"ticket_cost currency ({currency}) must match this corridor's known_fees currency "
+			f"({fee_currency}) -- they're summed into one transaction. Pass currency={fee_currency}, "
+			f"or fix the mismatched Corridor Definition.known_fees rows first.",
+			frappe.ValidationError,
+		)
+
 	placement.ticket_number = ticket_number
 	placement.flight_date = flight_date
 	placement.ticket_cost = ticket_cost
 	placement.save(ignore_permissions=True)
 
 	result = placement.as_dict()
-	if ticket_cost:
-		from agency_tracking.finance_api import _log_stage_transaction
+	if placement.corridor_fees_logged:
+		return result
 
-		save_point = frappe.generate_hash(length=10)
-		frappe.db.savepoint(save_point)
-		try:
-			_log_stage_transaction(
-				"Expense", ticket_cost, currency or "ETB", f"Ticket cost for {placement_name}", placement_name, None
-			)
-		except Exception:
-			frappe.db.rollback(save_point=save_point)
-			frappe.log_error(
-				title="Ticket cost logging failed",
-				message=f"{placement_name}: {frappe.get_traceback()}",
-			)
-			result["warning"] = (
-				f"Ticket saved, but the cost wasn't logged — ask Finance to set an FX rate for "
-				f"{currency or 'ETB'} (finance_api.set_fx_rate), then log it manually via "
-				f"finance_api.log_stage_expense."
-			)
+	ticket_amount = flt(ticket_cost)
+	combined_currency = currency or fee_currency or "ETB"
+	combined_amount = Decimal(str(ticket_amount)) + Decimal(str(fee_total))
+	if not combined_amount:
+		return result
+
+	save_point = frappe.generate_hash(length=10)
+	frappe.db.savepoint(save_point)
+	try:
+		fx_rate, fx_rate_date = get_fx_rate(combined_currency)
+		fx_rate = Decimal(str(fx_rate))
+		description = f"Ticket cost ({ticket_amount}) + corridor known fees ({fee_total}) for {placement_name}"
+		frappe.get_doc(
+			{
+				"doctype": "Applicant Transaction",
+				"placement": placement_name,
+				"transaction_type": "Expense",
+				"amount_original": combined_amount,
+				"currency_original": combined_currency,
+				"fx_rate": fx_rate,
+				"fx_rate_date": fx_rate_date,
+				"amount_birr": round(combined_amount * fx_rate, 2),
+				"description": description,
+				"stage_logged_at": "Ticketing",
+				"logged_by": frappe.session.user,
+				# System-computed from known/fixed values, not a discretionary staff entry --
+				# auto-Approved, skips the Finance review step (same precedent as
+				# finance_engine.accrue_commission's Commission transaction).
+				"status": "Approved",
+			}
+		).insert(ignore_permissions=True)
+		placement.db_set("corridor_fees_logged", 1, update_modified=False)
+		result["corridor_fees_logged"] = 1
+	except Exception:
+		frappe.db.rollback(save_point=save_point)
+		frappe.log_error(
+			title="Ticketing cost logging failed",
+			message=f"{placement_name}: {frappe.get_traceback()}",
+		)
+		result["warning"] = (
+			f"Ticket saved, but the combined cost wasn't logged — ask Finance to set an FX rate "
+			f"for {combined_currency} (finance_api.set_fx_rate), then retry by calling "
+			f"record_ticket_details again (it will still be unlogged, so it will retry)."
+		)
 	return result
 
 
@@ -390,6 +440,26 @@ def record_reschedule(placement_name=None, reschedule_date=None, reschedule_caus
 	return placement.as_dict()
 
 
+#: Applicant fields joined onto every list_placements row (2026-09-19) -- fixed set of
+#: read-only demographic/identity fields a placements workspace needs to render a row without
+#: a second round-trip per row. Deliberately NOT the same policy as portal_api.PORTAL_FIELDS:
+#: this endpoint is internal-staff-only (Placement's own doctype permissions already gate who
+#: can call it at all -- see the docstring below), so there's no third-party PII exposure
+#: concern the way there is for the Foreign Agency portal's candidate-browsing endpoints.
+_PLACEMENT_LIST_APPLICANT_FIELDS = [
+	"full_name",
+	"passport_number",
+	"photograph",
+	"photo_full_body",
+	"target_job",
+	"nationality",
+	"gender",
+	"religion",
+	"age",
+	"date_of_birth",
+]
+
+
 @frappe.whitelist()
 def list_placements(filters=None, limit_page_length=100, order_by="modified desc"):
 	"""backend-issues #02: the whitelisted list surface Placement never had -- callers used to
@@ -398,16 +468,42 @@ def list_placements(filters=None, limit_page_length=100, order_by="modified desc
 	that legitimately needs to resolve a placement reference (Finance Manager, Clearance Officer,
 	Complaint Manager, Communication Manager, the six country+step roles -- all granted read-only
 	access on the doctype itself, see placement.json). frappe.get_list enforces those permissions
-	the same way it would for any other doctype; no separate role check needed here."""
+	the same way it would for any other doctype; no separate role check needed here.
+
+	2026-09-19: also joins _PLACEMENT_LIST_APPLICANT_FIELDS onto each row (one batched
+	frappe.get_all, not one query per placement) -- found live: the frontend was enriching each
+	row with its own frappe.client.get call PER placement to fill these in, an N+1 pattern that
+	also bypassed this app's own permission model (frappe.client.get only checks Applicant's
+	default doctype permission, not any of this app's own role logic). destination_country is
+	deliberately NOT re-added here even though Applicant has it too -- Placement already carries
+	its own destination_country, and Placement.validate() guarantees it always equals the
+	applicant's, so joining it again would just be a same-value overwrite."""
 	if isinstance(filters, str):
 		filters = frappe.parse_json(filters)
-	return frappe.get_list(
+	placements = frappe.get_list(
 		"Placement",
 		filters=filters,
 		fields=["*"],
 		limit_page_length=frappe.utils.cint(limit_page_length) or 100,
 		order_by=order_by,
 	)
+
+	applicant_names = list({p.applicant for p in placements if p.get("applicant")})
+	applicant_by_name = {}
+	if applicant_names:
+		applicants = frappe.get_all(
+			"Applicant",
+			filters={"name": ["in", applicant_names]},
+			fields=["name"] + _PLACEMENT_LIST_APPLICANT_FIELDS,
+		)
+		applicant_by_name = {a.name: a for a in applicants}
+
+	for p in placements:
+		applicant = applicant_by_name.get(p.get("applicant"))
+		for field in _PLACEMENT_LIST_APPLICANT_FIELDS:
+			p[field] = applicant.get(field) if applicant else None
+
+	return placements
 
 
 @frappe.whitelist()

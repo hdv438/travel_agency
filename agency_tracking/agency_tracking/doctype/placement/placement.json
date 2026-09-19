@@ -51,6 +51,7 @@
   "ticket_number",
   "flight_date",
   "ticket_cost",
+  "corridor_fees_logged",
   "col_break_ticketing",
   "is_rescheduled",
   "reschedule_date",
@@ -335,10 +336,18 @@
    "label": "Flight Date"
   },
   {
-   "description": "Auto-logs a Pending Applicant Transaction expense.",
+   "description": "Auto-logs a single, already-Approved Applicant Transaction expense together with this corridor's known_fees (LMIS/Insurance/Taeshir/Injaz/Wakala/Kuwait LMIS/Police Ashara) -- see corridor_fees_logged and placement_api.record_ticket_details.",
    "fieldname": "ticket_cost",
    "fieldtype": "Currency",
    "label": "Ticket Cost"
+  },
+  {
+   "default": "0",
+   "description": "Set once record_ticket_details has auto-logged the combined ticket-cost + known-fees Expense transaction, so re-saving ticket details (e.g. correcting the ticket number) never logs it twice.",
+   "fieldname": "corridor_fees_logged",
+   "fieldtype": "Check",
+   "label": "Corridor Fees Logged",
+   "read_only": 1
   },
   {
    "fieldname": "col_break_ticketing",
@@ -414,7 +423,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-05 09:00:00.000000",
+ "modified": "2026-09-19 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agency Tracking",
  "name": "Placement",

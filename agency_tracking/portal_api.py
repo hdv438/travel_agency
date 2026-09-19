@@ -14,6 +14,14 @@ from agency_tracking.state_machine import lock_applicant_row
 # emergency contacts) — the spec doesn't enumerate an exact portal field list, so this is a
 # judgment call; tightened rather than loosened since the alternative is leaking PII to a
 # third-party agency before any commission has even been agreed.
+# 2026-09-19 product decision: an agency already receives every one of these fields on the
+# generated CV PDF (cv_api.py's _cv_context) once a candidate reaches CV Generated -- so none of
+# it is a NEW disclosure to withhold from the portal API. Both the candidate-browsing list
+# (list_portal_candidates) and the single-candidate detail call (get_candidate_detail) now return
+# this same set -- no separate, narrower "list" tier anymore. Still excludes what's genuinely NOT
+# on the CV and has no agency-facing purpose: national_id, labor_id, phone/alternate_phone, email,
+# home address, emergency_contact_*, region/sub_region, and all internal-only fields (fees,
+# medical_remarks).
 PORTAL_FIELDS = [
 	"name",
 	"full_name",
@@ -28,39 +36,10 @@ PORTAL_FIELDS = [
 	"destination_country",
 	"religion",
 	"marital_status",
-	"experience_country",
-	"years_of_experience",
-	"experience_video",
-]
-
-# Richer, still strictly non-PII profile an agency may pull for a SINGLE candidate it is allowed
-# to view (portal_api.get_candidate_detail). Adds physical attributes, education/experience, the
-# skills matrix, the self-intro experience video and salary expectation on top of PORTAL_FIELDS.
-# Deliberately excludes every direct-identifier / contact / location PII field (passport_number,
-# national_id, labor_id, phone/alternate_phone, email, address, emergency_contact_*, city/region/
-# sub_region/leaving_town) and all internal-only fields (fees, medical_remarks, remarks) — a
-# third-party agency browsing a catalog has no need for any of those before a placement exists.
-PORTAL_DETAIL_FIELDS = [
-	"name",
-	"full_name",
-	"gender",
-	"nationality",
-	"date_of_birth",
-	"age",
+	"children",
 	"height",
 	"weight",
 	"complexion",
-	"photograph",
-	"photo_full_body",
-	"experience_video",
-	"target_job",
-	"education",
-	"destination_country",
-	"religion",
-	"marital_status",
-	"children",
-	"salary_amount",
-	"salary_currency",
 	"institution",
 	"graduation_year",
 	"english_level",
@@ -69,8 +48,20 @@ PORTAL_DETAIL_FIELDS = [
 	"years_of_experience",
 	"experience_country",
 	"experience_period",
+	"experience_video",
 	"education_remarks",
 	"coc_status",
+	"salary_amount",
+	"salary_currency",
+	"place_of_birth",
+	"city",
+	"leaving_town",
+	"remarks",
+	"passport_number",
+	"passport_issue_date",
+	"passport_expiry_date",
+	"passport_issue_place",
+	"passport_scan",
 	"skill_cleaning",
 	"skill_cooking",
 	"skill_washing",
@@ -82,6 +73,12 @@ PORTAL_DETAIL_FIELDS = [
 	"skill_driving",
 	"skill_sewing",
 ]
+
+# Kept as an alias, not a narrower list -- get_candidate_detail used to return a richer set than
+# list_portal_candidates; now they're identical (see PORTAL_FIELDS' own comment). Two names are
+# kept only so call sites read clearly ("the list fields" vs "the detail fields") without implying
+# the sets differ.
+PORTAL_DETAIL_FIELDS = PORTAL_FIELDS
 
 # Fields a Foreign Agency may see on its OWN placements (portal_api.list_my_placements). Lifecycle,
 # contract/visa identifiers, medical checkpoints and travel logistics — the things an agency needs
@@ -260,8 +257,8 @@ def _assert_can_view_candidate(applicant_name):
 
 @frappe.whitelist()
 def get_candidate_detail(applicant_name=None, **kwargs):
-	"""Rich, non-PII profile for a single catalog candidate (experience video, skills matrix,
-	education/experience, physical attributes, salary expectation — PORTAL_DETAIL_FIELDS).
+	"""Full CV-equivalent profile for a single catalog candidate (PORTAL_FIELDS -- same set
+	list_portal_candidates now returns per row too, see that constant's own comment).
 
 	Same tenant/country scoping as the marketplace (see _assert_can_view_candidate)."""
 	applicant_name = applicant_name or kwargs.get("applicant") or kwargs.get("name")
