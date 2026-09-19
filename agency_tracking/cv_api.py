@@ -54,7 +54,7 @@ def _cv_context(applicant):
 		"complexion": applicant.complexion or "FAIR",
 		"age": age or "",
 		"date_of_birth": _fmt_date(applicant.date_of_birth),
-		"place_of_birth": applicant.city or "",
+		"place_of_birth": applicant.place_of_birth or applicant.city or "",
 		"leaving_town": applicant.leaving_town or "",
 		"english_level": applicant.english_level or "",
 		"arabic_level": applicant.arabic_level or "",

@@ -847,7 +847,7 @@ def _injaz_context(step, placement, applicant):
 		# ── applicant ──
 		"full_name": _upper(applicant.full_name),
 		"date_of_birth": _fmt_date(applicant.date_of_birth),
-		"place_of_birth": _upper(applicant.city),
+		"place_of_birth": _upper(applicant.place_of_birth or applicant.city),
 		"past_nationality": nationality,
 		"current_nationality": nationality,
 		"sex": applicant.gender or "",

@@ -489,9 +489,9 @@ def parse_mrz_td3(line1, line2):
 	# never "Applicant"/"Ethiopia"/"Female". map_mrz_fields skips None, so blanks stay blank for a
 	# human to fill rather than being seeded with fabricated data.
 	result["passport_number"] = clean_passport_num or None
-	result["first_name"] = first_name.title() if first_name else None
-	result["middle_name"] = middle_name.title() if middle_name else None
-	result["last_name"] = last_name.title() if last_name else None
+	result["first_name"] = first_name.upper() if first_name else None
+	result["middle_name"] = middle_name.upper() if middle_name else None
+	result["last_name"] = last_name.upper() if last_name else None
 
 	parts = [result["first_name"], result["middle_name"], result["last_name"]]
 	result["full_name"] = " ".join([p for p in parts if p]).strip() or None
@@ -551,10 +551,10 @@ def parse_mrz_td1(line1, line2, line3):
 			"expiry_date": {"valid": val_exp},
 		},
 		"passport_number": corr_doc_num.replace("<", "").strip() or None,
-		"first_name": first_name.title() if first_name else None,
-		"middle_name": middle_name.title() if middle_name else None,
-		"last_name": last_name.title() if last_name else None,
-		"full_name": " ".join(filter(None, [first_name, middle_name, last_name])).title() or None,
+		"first_name": first_name.upper() if first_name else None,
+		"middle_name": middle_name.upper() if middle_name else None,
+		"last_name": last_name.upper() if last_name else None,
+		"full_name": " ".join(filter(None, [first_name, middle_name, last_name])).upper() or None,
 		"nationality": _resolve_country_name(nationality_code) or ISO_ALPHA3_TO_COUNTRY.get(nationality_code),
 		"place_of_issue": _resolve_country_name(issuing_country_code) or ISO_ALPHA3_TO_COUNTRY.get(issuing_country_code),
 		"date_of_birth": parse_mrz_date(corr_dob, is_expiry=False),
@@ -574,9 +574,10 @@ def extract_mrz_from_raw_text(raw_text):
 	lines = [clean_mrz_line(l) for l in raw_lines]
 	lines = [l for l in lines if len(l) >= 20]
 
-	# Printed issue date off the same text we already have (MRZ has none) — overrides the derived
-	# one on whichever MRZ result we return below.
+	# Printed issue date and place of birth off the same text we already have (MRZ carries neither)
+	# — applied to whichever MRZ result we return below.
 	printed_issue = find_printed_issue_date(raw_text)
+	printed_pob = find_printed_place_of_birth(raw_text)
 
 	# 1. Look for TD3 lines (starts with P, PQ, PA, PB, etc. or contains <<)
 	for i in range(len(lines)):
@@ -597,20 +598,20 @@ def extract_mrz_from_raw_text(raw_text):
 		if is_l1_mrz and (i + 1 < len(lines)):
 			l2 = lines[i + 1]
 			if len(l2) >= 28:
-				return _apply_printed_issue(parse_mrz_td3(l1, l2), printed_issue)
+				return _apply_printed_fields(parse_mrz_td3(l1, l2), printed_issue, printed_pob)
 
 	# 2. Look for any adjacent lines with << or passport numbers
 	for i in range(len(lines) - 1):
 		l1 = lines[i]
 		l2 = lines[i + 1]
 		if (len(l1) >= 30 and len(l2) >= 30) and ("<" in l1 or "<" in l2):
-			return _apply_printed_issue(parse_mrz_td3(l1, l2), printed_issue)
+			return _apply_printed_fields(parse_mrz_td3(l1, l2), printed_issue, printed_pob)
 
 	# 3. Look for TD1 (3 lines)
 	for i in range(len(lines) - 2):
 		l1, l2, l3 = lines[i], lines[i + 1], lines[i + 2]
 		if 25 <= len(l1) <= 35 and 25 <= len(l2) <= 35 and 25 <= len(l3) <= 35:
-			return _apply_printed_issue(parse_mrz_td1(l1, l2, l3), printed_issue)
+			return _apply_printed_fields(parse_mrz_td1(l1, l2, l3), printed_issue, printed_pob)
 
 	return extract_visual_passport_data(raw_text)
 
@@ -684,10 +685,52 @@ def find_printed_issue_date(raw_text):
 	return None
 
 
-def _apply_printed_issue(result, printed_issue):
-	"""Override a parser result's derived issue date with a printed one when we found it."""
-	if result and printed_issue:
+def find_printed_place_of_birth(raw_text):
+	"""Read the printed 'Place of Birth' from the passport's visual zone, off text we ALREADY
+	extracted (PDF text stream or the OCR the MRZ step already ran) -- no extra OCR pass. Like the
+	issue date, the MRZ itself has no place-of-birth field at all (ICAO 9303), so this visual-zone
+	label is the only source there is, independent of whether the MRZ read validated. Returns the
+	value upper-cased and trimmed, or None."""
+	if not raw_text:
+		return None
+	lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+	# 2026-09-19 fix: live-tested against two real Ethiopian passports, this label came back
+	# OCR-mangled a different way on each one -- "Place uf Birth" (of -> uf) on one, "Place of
+	# Binh" (Birth -> Binh, rt collapsed to n) on the other. The old exact-match "Place of Birth"
+	# missed BOTH. `[A-Za-z]{0,3}` tolerates a garbled "of"; `B\w{2,4}h` tolerates a garbled
+	# "Birth" (matches Birth/Binh/Brith/etc -- any B...h word of plausible length) without
+	# matching unrelated labels: "Date of Birth" ("Dale of Binh" in the same OCR pass) is still
+	# excluded because it has no "Place" immediately before the B...h token.
+	pattern = re.compile(r"(?:Place\s*[A-Za-z]{0,3}\s*B\w{2,4}h|Birth\s*Place|POB)\s*[:=]?\s*(.*)", re.I)
+	for i, line in enumerate(lines):
+		m = pattern.search(line)
+		if not m:
+			continue
+		val = m.group(1).strip()
+		# A label sitting right next to another printed field on the same OCR'd line (e.g. "Place
+		# of Birth ADDIS ABABA Sex F") shouldn't swallow that next field as part of the value.
+		val = re.sub(r"\s*(?:Sex|Gender|Nationality|Date\s*of\s*(?:Issue|Birth|Expiry)|Authority)\b.*$", "", val, flags=re.I).strip()
+		if val and not re.search(r"Passport|Country|Date", val, re.I):
+			return val.upper()
+		# Label with no usable value on the same line -- the value is often printed on the next
+		# line instead (same pattern passport-number extraction already relies on).
+		if not val and i + 1 < len(lines):
+			nxt = lines[i + 1].strip()
+			if nxt and not re.search(r"Passport|Country|Sex|Gender|Date", nxt, re.I):
+				return nxt.upper()
+	return None
+
+
+def _apply_printed_fields(result, printed_issue, printed_pob=None):
+	"""Adds visual-zone-only fields the MRZ itself can't carry (ICAO 9303 has neither an issue
+	date nor a place-of-birth field) onto an MRZ parser result -- overriding the issue date's own
+	derived guess, and filling place_of_birth which MRZ parsing never sets at all."""
+	if not result:
+		return result
+	if printed_issue:
 		result["passport_issue_date"] = printed_issue
+	if printed_pob:
+		result["place_of_birth"] = printed_pob
 	return result
 
 
@@ -698,6 +741,7 @@ def extract_visual_passport_data(raw_text):
 
 	lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
 	printed_issue = find_printed_issue_date(raw_text)
+	printed_pob = find_printed_place_of_birth(raw_text)
 	# Visual (non-MRZ) extraction is the low-confidence last resort -- no fabricated defaults
 	# (audit G-002) and the whole result is flagged needs_review in map_mrz_fields.
 	data = {
@@ -710,6 +754,7 @@ def extract_visual_passport_data(raw_text):
 		"full_name": None,
 		"nationality": None,
 		"place_of_issue": None,
+		"place_of_birth": printed_pob,
 		"date_of_birth": None,
 		"passport_issue_date": None,
 		"passport_expiry": None,
@@ -734,15 +779,15 @@ def extract_visual_passport_data(raw_text):
 			if val and not re.search(r'Passport|Country|Sex|Date', val, re.I):
 				parts = val.split()
 				if parts:
-					data["first_name"] = parts[0].title()
+					data["first_name"] = parts[0].upper()
 					if len(parts) > 1:
-						data["middle_name"] = " ".join(parts[1:]).title()
+						data["middle_name"] = " ".join(parts[1:]).upper()
 
 		# Surname
 		if re.search(r'(?:Surname|Last\s*Name)', line, re.I):
 			val = re.sub(r'^(?:Surname|Last\s*Name)[:=\s]+', '', line, flags=re.I).strip()
 			if val and not re.search(r'Passport|Country|Sex|Date', val, re.I):
-				data["last_name"] = val.title()
+				data["last_name"] = val.upper()
 
 		# Date of birth
 		if re.search(r'(?:Date\s*of\s*birth|DOB|Birth\s*Date)', line, re.I):
@@ -776,9 +821,9 @@ def extract_visual_passport_data(raw_text):
 	if data.get("first_name") or data.get("last_name"):
 		given = " ".join(filter(None, [data.get("first_name"), data.get("middle_name")]))
 		first, middle, last = split_name_parts(data.get("last_name"), given)
-		data["first_name"] = first.title() if first else data.get("first_name")
-		data["middle_name"] = middle.title() if middle else None
-		data["last_name"] = last.title() if last else None
+		data["first_name"] = first.upper() if first else data.get("first_name")
+		data["middle_name"] = middle.upper() if middle else None
+		data["last_name"] = last.upper() if last else None
 
 	if data.get("passport_number") or (data.get("first_name") and data.get("date_of_birth")):
 		return data
@@ -931,11 +976,11 @@ def map_mrz_fields(mrz_dict: dict) -> dict:
 		if any(len(n) > MAX_PLAUSIBLE_NAME_TOKEN_LENGTH for n in (first, middle, last) if n):
 			needs_review = True
 		if first:
-			fields["first_name"] = str(first).title()
+			fields["first_name"] = str(first).upper()
 		if middle:
-			fields["middle_name"] = str(middle).title()
+			fields["middle_name"] = str(middle).upper()
 		if last:
-			fields["last_name"] = str(last).title()
+			fields["last_name"] = str(last).upper()
 
 	nat = mrz_dict.get("nationality")
 	if not nat:
@@ -947,6 +992,10 @@ def map_mrz_fields(mrz_dict: dict) -> dict:
 	issue_place = mrz_dict.get("place_of_issue")
 	if issue_place:
 		fields["passport_issue_place"] = issue_place
+
+	pob = mrz_dict.get("place_of_birth")
+	if pob:
+		fields["place_of_birth"] = pob
 
 	if needs_review:
 		fields["needs_passport_review"] = 1
