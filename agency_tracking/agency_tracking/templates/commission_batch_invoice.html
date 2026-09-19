@@ -99,8 +99,23 @@
 			{% else %}None / لا يوجد{% endif %}
 		</td>
 	</tr>
-	<tr class="highlight"><td class="label">TOTAL</td><td class="value">{{ "%.2f"|format((batch.total_amount_original or 0) + (batch.requested_advance_amount or 0) + (previous_unpaid_original or 0)) }} {{ batch.currency }}</td></tr>
+	{% if batch.write_offs %}
+	<tr><td class="label">Write-off / شطب</td><td class="value">-{{ "%.2f"|format(batch.write_off_total_original or 0) }} {{ batch.currency }}</td></tr>
+	{% endif %}
+	<tr class="highlight"><td class="label">TOTAL</td><td class="value">{{ "%.2f"|format((batch.total_amount_original or 0) + (batch.requested_advance_amount or 0) + (previous_unpaid_original or 0) - (batch.write_off_total_original or 0)) }} {{ batch.currency }}</td></tr>
 </table>
+
+{% if batch.write_offs %}
+<table class="totals-table" style="margin-top: 10px;">
+	<tr><td class="label" colspan="2" style="text-align: left; background: #f0f0f0;">Write-offs / الشطوبات</td></tr>
+	{% for wo in batch.write_offs %}
+	<tr>
+		<td class="label" style="text-align: left;">{{ wo.write_off_date or "" }} — {{ wo.reason }}</td>
+		<td class="value">-{{ "%.2f"|format(wo.amount_original or 0) }} {{ batch.currency }}</td>
+	</tr>
+	{% endfor %}
+</table>
+{% endif %}
 
 <div class="footer">
 	<p class="underline">{{ agency.agency_name or "" }}</p>

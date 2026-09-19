@@ -6,6 +6,7 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "display_no",
   "placement",
   "contractor",
   "col_break_complaint",
@@ -20,6 +21,14 @@
   "resolved_on"
  ],
  "fields": [
+  {
+   "description": "Sequential display number (1, 2, 3, ...) derived from name's numeric suffix at creation -- never shown as CMP-00001 on any complaint-facing screen, and never used to look the record up (name still is).",
+   "fieldname": "display_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Complaint #",
+   "read_only": 1
+  },
   {
    "fieldname": "placement",
    "fieldtype": "Link",

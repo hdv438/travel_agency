@@ -401,6 +401,25 @@ def write_off_batch(batch_name=None, write_off_amount=None, write_off_reason=Non
 
 
 @frappe.whitelist()
+def list_batch_write_offs(batch_name=None, **kwargs):
+	"""Every write-off row booked against one batch (amount, reason, date, linked Expense
+	transaction) -- oldest first, so a "why is this batch short?" screen can show the full
+	negotiation history instead of just the summed write_off_total_original. A batch can have
+	several rows (write_off_batch is callable more than once per batch)."""
+	if not ({"Finance Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	batch_name = batch_name or kwargs.get("batch") or kwargs.get("name")
+	if not batch_name or not frappe.db.exists("Commission Batch Request", batch_name):
+		frappe.throw("A valid batch_name is required.", frappe.ValidationError)
+	return frappe.get_all(
+		"Commission Batch Write Off",
+		filters={"parent": batch_name, "parenttype": "Commission Batch Request"},
+		fields=["name", "amount_original", "amount_birr", "reason", "transaction", "write_off_date", "idx"],
+		order_by="idx asc",
+	)
+
+
+@frappe.whitelist()
 def release_unpaid_items(item_names=None, **kwargs):
 	"""Carry unpaid items out of a (usually settled) batch back into the owed pool so they can be
 	pulled into a new commission request. Each keeps a trace-back to its original batch."""

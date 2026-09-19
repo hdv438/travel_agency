@@ -76,7 +76,7 @@ def list_unresolved_complaints():
 	return frappe.get_list(
 		"Complaint",
 		filters={"status": "Unresolved"},
-		fields=["name", "placement", "contractor", "description", "creation"],
+		fields=["name", "display_no", "placement", "contractor", "description", "creation"],
 		order_by="creation asc",
 	)
 
@@ -93,7 +93,7 @@ def list_new_complaints():
 	return frappe.get_list(
 		"Complaint",
 		filters={"status": "New"},
-		fields=["name", "placement", "contractor", "raised_by", "worker_status_at_complaint",
+		fields=["name", "display_no", "placement", "contractor", "raised_by", "worker_status_at_complaint",
 		        "description", "status", "creation"],
 		order_by="creation asc",
 	)
@@ -112,7 +112,7 @@ def list_complaints(status=None, **kwargs):
 	return frappe.get_list(
 		"Complaint",
 		filters=filters,
-		fields=["name", "placement", "contractor", "raised_by", "worker_status_at_complaint",
+		fields=["name", "display_no", "placement", "contractor", "raised_by", "worker_status_at_complaint",
 		        "description", "status", "resolution_notes", "resolved_by", "resolved_on", "creation"],
 		order_by="creation asc",
 	)
