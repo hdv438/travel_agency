@@ -3,10 +3,11 @@
 #
 # Cloudflare R2 (S3-compatible object storage), for the documents that don't belong in
 # Frappe's own local file storage: Finance receipt images, generated Injaz papers, generated
-# CV PDFs, parsed contracts/visas, applicant photos. One upload function, reused everywhere.
-# Key convention:
+# CV PDFs, parsed contracts/visas, applicant photos/videos. One upload function, reused
+# everywhere. Key convention:
 #   agency/{applicant_name}/{category}/{filename}
-# where category is one of "cv", "injaz", "finance-receipts", "contracts", "visas", "photos".
+# where category is one of "cv", "injaz", "finance-receipts", "contracts", "visas", "photos",
+# "videos".
 #
 # Credentials are left empty until an admin enters them in Storage Settings -- calls fail with a
 # clear "not configured" error in the meantime, never crash the calling flow (same honesty
@@ -17,7 +18,7 @@
 
 import frappe
 
-STORAGE_CATEGORIES = {"cv", "injaz", "finance-receipts", "contracts", "visas", "photos"}
+STORAGE_CATEGORIES = {"cv", "injaz", "finance-receipts", "contracts", "visas", "photos", "videos"}
 
 # Per-process cache of buckets already verified/created this worker's lifetime, so head_bucket
 # isn't re-issued on every single upload. Keyed by bucket name.
@@ -112,16 +113,104 @@ def build_object_key(applicant_name, category, filename):
 	return f"agency/{applicant_name}/{category}/{filename}"
 
 
+R2_REF_PREFIX = "r2:"
+
+
+def is_r2_ref(value):
+	"""True if `value` is this app's internal R2 reference tag, not a real URL/local file path."""
+	return bool(value) and isinstance(value, str) and value.startswith(R2_REF_PREFIX)
+
+
+def _key_from_ref(value):
+	return value[len(R2_REF_PREFIX):]
+
+
 def upload_to_r2(file_content: bytes, key: str, content_type: str | None = None) -> str:
-	"""Uploads raw bytes to the configured R2 bucket at `key`, returns the public URL. Ensures
-	the bucket exists first (auto-creates on 404). Raises a clear ValidationError (not a crash)
-	if Storage Settings isn't configured or the credentials/bucket can't be reached."""
+	"""Uploads raw bytes to the configured R2 bucket at `key`. Returns an internal reference
+	("r2:{key}"), deliberately NOT a public URL.
+
+	2026-09-21 decision, reversing this function's original design: the bucket stays PRIVATE.
+	A public bucket makes every object fetchable by anyone who has or guesses its URL -- and this
+	app's key convention (agency/{applicant_name}/{category}/{filename}, with sequential
+	Applicant names like APP-00001) is trivially enumerable. Someone could script through every
+	APP-##### and scrape every passport scan/photo/receipt in the system with zero
+	authentication -- there's no per-object ACL on a public R2 bucket, it's all-or-nothing.
+
+	Callers never use this reference directly -- they resolve it only after their OWN permission
+	check has already passed: resolve_r2_url() for a short-lived signed URL (redirect-to-R2
+	cases, e.g. portal_api.get_candidate_photo), or get_object_bytes() to pull the raw bytes
+	in-process (server-side PDF embedding, see pdf_utils.attach_datauri/embed_image_datauri).
+	Ensures the bucket exists first (auto-creates on 404). Raises a clear ValidationError (not a
+	crash) if Storage Settings isn't configured or the credentials/bucket can't be reached."""
 	client, settings = _r2_client()
 	ensure_bucket_exists(client, settings.r2_bucket_name)
 	extra_args = {"ContentType": content_type} if content_type else {}
 	client.put_object(Bucket=settings.r2_bucket_name, Key=key, Body=file_content, **extra_args)
-	base = (settings.r2_public_url_base or "").rstrip("/")
-	return f"{base}/{key}"
+	return f"{R2_REF_PREFIX}{key}"
+
+
+def get_object_bytes(ref_or_key: str) -> bytes:
+	"""Fetches an object's raw bytes directly from R2 (accepts an "r2:{key}" reference or a bare
+	key) for a caller that needs the actual content in-process -- e.g. embedding a photo as a
+	PDF data: URI -- not a URL for someone else to fetch later. This call itself IS the
+	authenticated read (via the account's own R2 credentials); no presigning involved."""
+	client, settings = _r2_client()
+	key = _key_from_ref(ref_or_key) if is_r2_ref(ref_or_key) else ref_or_key
+	obj = client.get_object(Bucket=settings.r2_bucket_name, Key=key)
+	return obj["Body"].read()
+
+
+def resolve_r2_url(value, expires_in=7200):
+	"""If `value` is an "r2:{key}" reference, returns a signed GET URL (2 hour default --
+	2026-09-21: long enough that a candidate video being watched/scrubbed doesn't have its URL
+	expire mid-playback, per product decision) that's independently fetchable without going
+	through this app again. Generates the
+	URL only when actually needed -- this function does no permission gating itself, it trusts
+	the caller already did that before calling it (e.g. portal_api._assert_can_view_candidate).
+	Anything else (blank, a local Frappe file path, an old pre-2026-09-21 public R2 URL from
+	before the bucket was made private) passes through unchanged."""
+	if not is_r2_ref(value):
+		return value
+	client, settings = _r2_client()
+	return client.generate_presigned_url(
+		"get_object",
+		Params={"Bucket": settings.r2_bucket_name, "Key": _key_from_ref(value)},
+		ExpiresIn=expires_in,
+	)
+
+
+def resolve_r2_fields(rows, fieldnames, expires_in=7200):
+	"""Bulk in-place variant of resolve_r2_url for a list of dict-like rows (e.g. a
+	frappe.get_all result) -- mutates each row's given fields, replacing any R2 reference with a
+	signed URL. Builds the R2 client at most once per call (skips entirely, no credentials
+	round-trip at all, if nothing in `rows` actually holds an R2 reference -- keeps this a safe
+	no-op for not-yet-migrated data even when Storage Settings isn't configured)."""
+	if not rows:
+		return rows
+
+	def _get(row, f):
+		return row.get(f) if hasattr(row, "get") else row[f]
+
+	def _set(row, f, v):
+		if hasattr(row, "__setitem__"):
+			row[f] = v
+		else:
+			setattr(row, f, v)
+
+	if not any(is_r2_ref(_get(row, f)) for row in rows for f in fieldnames):
+		return rows
+
+	client, settings = _r2_client()
+	for row in rows:
+		for fieldname in fieldnames:
+			value = _get(row, fieldname)
+			if is_r2_ref(value):
+				_set(row, fieldname, client.generate_presigned_url(
+					"get_object",
+					Params={"Bucket": settings.r2_bucket_name, "Key": _key_from_ref(value)},
+					ExpiresIn=expires_in,
+				))
+	return rows
 
 
 @frappe.whitelist()
@@ -154,28 +243,33 @@ def test_storage_connection():
 			"message": f"Bucket reachable but object write failed: {e}",
 		}
 
-	base = (settings.r2_public_url_base or "").rstrip("/")
 	return {
 		"status": "success",
 		"bucket": bucket,
-		"public_url_base": base,
-		"message": f"Connected to R2 bucket '{bucket}' and verified read/write access.",
+		"private": True,
+		"message": f"Connected to R2 bucket '{bucket}' and verified read/write access. "
+		"Bucket is private by design -- objects are only reachable via short-lived signed URLs "
+		"this app generates after its own permission checks pass, never a public bucket URL.",
 	}
 
 
 def migrate_attach_to_r2(doc, fieldname, category, applicant_name=None):
-	"""Shared receipt-upload path (2026-08-29) -- same behavior everywhere a receipt/photo is
-	captured: Applicant Transaction.receipt_image, Injaz Attempt.receipt_photo,
-	Clearance Step Payment.receipt_url. The field itself stays a normal Frappe Attach (so the
+	"""Shared attach-upload path (2026-08-29, extended 2026-09-21 to media beyond receipts) --
+	same behavior everywhere a receipt/photo/video is captured: Applicant Transaction.receipt_image,
+	Injaz Attempt.receipt_photo, Clearance Step Payment.receipt_url, Applicant.photograph/
+	photo_full_body/experience_video. The field itself stays a normal Frappe Attach (so the
 	browser gets Frappe's native upload widget, nothing custom to build) -- this just runs on
-	save, notices the value is still a *local* Frappe file, uploads it to R2, repoints the
-	field at the resulting public URL, and deletes the local copy so nothing is stored twice.
+	save, notices the value is still a *local* Frappe file, uploads it to R2, repoints the field
+	at an internal "r2:{key}" reference (NOT a usable URL -- see upload_to_r2's docstring for why
+	the bucket is private), and deletes the local copy so nothing is stored twice. Callers that
+	need to actually serve/embed this value must resolve it first via resolve_r2_url /
+	resolve_r2_fields (URL, for a redirect) or get_object_bytes (raw bytes, for PDF embedding).
 
 	Best-effort, like every other document-generation path in this app (contract parsing, FX
 	fetch): if Storage Settings isn't configured yet, or anything else goes wrong, log it and
 	leave the local file in place (still viewable via Frappe's own file serving) rather than
 	blocking the save. Safe to call unconditionally on every save -- a value that's already an
-	R2 URL (doesn't start with /files/ or /private/files/) is a no-op.
+	R2 reference (doesn't start with /files/ or /private/files/) is a no-op.
 	"""
 	value = doc.get(fieldname)
 	if not value or not (value.startswith("/files/") or value.startswith("/private/files/")):
@@ -188,8 +282,8 @@ def migrate_attach_to_r2(doc, fieldname, category, applicant_name=None):
 		file_doc = frappe.get_doc("File", file_name)
 		content = file_doc.get_content()
 		key = build_object_key(applicant_name or doc.name, category, file_doc.file_name)
-		r2_url = upload_to_r2(content, key, content_type=file_doc.content_type)
-		doc.set(fieldname, r2_url)
+		r2_ref = upload_to_r2(content, key, content_type=file_doc.content_type)
+		doc.set(fieldname, r2_ref)
 		frappe.delete_doc("File", file_name, ignore_permissions=True, force=True)
 	except Exception:
 		frappe.log_error(title="R2 receipt migration failed", message=f"{doc.doctype} {doc.name} {fieldname}")

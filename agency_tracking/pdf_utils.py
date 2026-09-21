@@ -122,8 +122,22 @@ def attach_datauri(url):
 		return None
 	if url.startswith("data:"):
 		return url
+
+	from agency_tracking.storage_engine import is_r2_ref, get_object_bytes
+
+	if is_r2_ref(url):
+		# 2026-09-21: R2 is a private bucket now -- fetch bytes directly with our own R2
+		# credentials rather than a network HTTP fetch, same reliability rationale as the local-
+		# file case below (no dependency on wkhtmltopdf being able to reach anything over HTTP).
+		try:
+			content = get_object_bytes(url)
+		except Exception:
+			frappe.log_error(title="attach_datauri: could not read R2 object", message=url)
+			return None
+		content_type = mimetypes.guess_type(url)[0] or "image/jpeg"
+		return f"data:{content_type};base64," + base64.b64encode(content).decode()
 	if url.startswith(("http://", "https://")):
-		# Already independently fetchable (e.g. R2-hosted) -- no local File doc to embed from.
+		# Not one of our own R2 refs -- some other already-independently-fetchable URL.
 		return url
 
 	file_name = frappe.db.get_value("File", {"file_url": url}, "name")
@@ -162,25 +176,40 @@ def embed_image_datauri(url, max_dimension=1000, jpeg_quality=82):
 		return None
 	if url.startswith("data:"):
 		return url
-	if url.startswith(("http://", "https://")):
+
+	from agency_tracking.storage_engine import is_r2_ref, get_object_bytes
+
+	source_label = url
+	if is_r2_ref(url):
+		# 2026-09-21: R2 is a private bucket now -- fetch bytes directly with our own R2
+		# credentials, same as attach_datauri.
+		try:
+			content = get_object_bytes(url)
+		except Exception:
+			frappe.log_error(title="embed_image_datauri: could not read R2 object", message=url)
+			return None
+		content_type = mimetypes.guess_type(url)[0] or "image/jpeg"
+	elif url.startswith(("http://", "https://")):
 		return url
+	else:
+		file_name = frappe.db.get_value("File", {"file_url": url}, "name")
+		if not file_name:
+			return None
+		source_label = f"{url} ({file_name})"
+		try:
+			file_doc = frappe.get_doc("File", file_name)
+			content = file_doc.get_content()
+		except Exception:
+			frappe.log_error(title="embed_image_datauri: could not read file", message=source_label)
+			return None
 
-	file_name = frappe.db.get_value("File", {"file_url": url}, "name")
-	if not file_name:
-		return None
-	try:
-		file_doc = frappe.get_doc("File", file_name)
-		content = file_doc.get_content()
-	except Exception:
-		frappe.log_error(title="embed_image_datauri: could not read file", message=f"{url} ({file_name})")
-		return None
+		# File.content_type is never a persisted field (frappe/core/doctype/file/file.py only sets
+		# it as a transient in-memory attribute during the original upload hook) -- a document
+		# reloaded via frappe.get_doc, as both callers here always do, never has it and raises
+		# AttributeError. mimetypes.guess_type is the same fallback Frappe's own file-serving code
+		# uses (frappe/utils/response.py).
+		content_type = mimetypes.guess_type(file_doc.file_name)[0] or "image/jpeg"
 
-	# File.content_type is never a persisted field (frappe/core/doctype/file/file.py only sets
-	# it as a transient in-memory attribute during the original upload hook) -- a document
-	# reloaded via frappe.get_doc, as both callers here always do, never has it and raises
-	# AttributeError. mimetypes.guess_type is the same fallback Frappe's own file-serving code
-	# uses (frappe/utils/response.py).
-	content_type = mimetypes.guess_type(file_doc.file_name)[0] or "image/jpeg"
 	try:
 		from PIL import Image
 
@@ -196,7 +225,7 @@ def embed_image_datauri(url, max_dimension=1000, jpeg_quality=82):
 	except Exception:
 		# Best-effort -- an unresizable/corrupt image still embeds at its original size rather
 		# than showing an empty-state placeholder for a file that does exist.
-		frappe.log_error(title="embed_image_datauri: resize failed, embedding original", message=f"{url} ({file_name})")
+		frappe.log_error(title="embed_image_datauri: resize failed, embedding original", message=source_label)
 
 	return f"data:{content_type};base64," + base64.b64encode(content).decode()
 

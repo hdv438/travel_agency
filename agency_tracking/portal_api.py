@@ -212,12 +212,19 @@ def list_portal_candidates(target_job=None, gender=None, **kwargs):
 	if gender:
 		filters["gender"] = gender
 
-	return frappe.get_list(
+	rows = frappe.get_list(
 		"Applicant",
 		filters=filters,
 		fields=PORTAL_FIELDS,
 		ignore_permissions=True,
 	)
+	# Resolve any R2-stored media (photograph/photo_full_body/experience_video/passport_scan --
+	# see storage_engine.py's 2026-09-21 private-bucket rewrite) to short-lived signed URLs. A
+	# safe no-op for rows whose files are still local, or not yet migrated to R2 at all.
+	from agency_tracking.storage_engine import resolve_r2_fields
+
+	resolve_r2_fields(rows, ["photograph", "photo_full_body", "experience_video", "passport_scan"])
+	return rows
 
 
 def _assert_can_view_candidate(applicant_name):
@@ -265,7 +272,12 @@ def get_candidate_detail(applicant_name=None, **kwargs):
 	if not applicant_name:
 		frappe.throw("applicant_name is required.", frappe.ValidationError)
 	_assert_can_view_candidate(applicant_name)
-	return frappe.db.get_value("Applicant", applicant_name, PORTAL_DETAIL_FIELDS, as_dict=True)
+	row = frappe.db.get_value("Applicant", applicant_name, PORTAL_DETAIL_FIELDS, as_dict=True)
+
+	from agency_tracking.storage_engine import resolve_r2_fields
+
+	resolve_r2_fields([row], ["photograph", "photo_full_body", "experience_video", "passport_scan"])
+	return row
 
 
 # The ONLY candidate images an agency may load. Sensitive files (passport_scan, contract, visa) are
@@ -280,9 +292,10 @@ def get_candidate_photo(applicant_name=None, kind="photograph", **kwargs):
 	so this is their only path to these images -- and it exposes ONLY photograph / photo_full_body,
 	never passport/contract/visa files.
 
-	Storage-agnostic, so it's correct both now and after the R2 cutover: a local Frappe file is
-	streamed inline; a photo already offloaded to R2 (an absolute public URL) is served via a
-	redirect. Missing photo -> 404."""
+	Storage-agnostic: a local Frappe file is streamed inline; a photo offloaded to R2 (2026-09-21:
+	R2 is a PRIVATE bucket now, see storage_engine.py) is served via a redirect to a short-lived
+	signed URL generated only after the permission gate above already passed -- never a bare
+	public bucket URL. Missing photo -> 404."""
 	applicant_name = applicant_name or kwargs.get("applicant") or kwargs.get("name")
 	kind = kind if kind in CANDIDATE_PHOTO_KINDS else "photograph"
 	if not applicant_name:
@@ -293,10 +306,11 @@ def get_candidate_photo(applicant_name=None, kind="photograph", **kwargs):
 	if not value:
 		frappe.throw("No photo on file for this candidate.", frappe.DoesNotExistError)
 
-	# R2 / any absolute URL: send the browser (or the frontend proxy) straight to the public object.
-	if value.startswith("http://") or value.startswith("https://"):
+	from agency_tracking.storage_engine import is_r2_ref, resolve_r2_url
+
+	if is_r2_ref(value):
 		frappe.local.response["type"] = "redirect"
-		frappe.local.response["location"] = value
+		frappe.local.response["location"] = resolve_r2_url(value)
 		return
 
 	# Local Frappe file: stream the bytes ourselves (the agency has no direct File read permission,

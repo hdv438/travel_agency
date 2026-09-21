@@ -109,6 +109,21 @@ class Applicant(Document):
 	def on_update(self):
 		self.maybe_log_fee_transaction()
 		self.sync_fee_log()
+		self.sync_media_to_r2()
+
+	def sync_media_to_r2(self):
+		"""2026-09-21: the "photos"/"videos" storage categories existed in storage_engine.py's
+		STORAGE_CATEGORIES from the start, and portal_api.get_candidate_photo was already written
+		"storage-agnostic ... correct both now and after the R2 cutover" -- but nothing ever
+		actually called migrate_attach_to_r2 for these fields, so the cutover never happened.
+		Closes that gap the same way sync_fee_log already does for receipts: best-effort, no-op
+		once already an R2 URL, silently leaves the local file in place if R2 isn't configured
+		(see migrate_attach_to_r2 / upload_to_r2's Public URL Base guard)."""
+		from agency_tracking.storage_engine import migrate_attach_to_r2
+
+		migrate_attach_to_r2(self, "photograph", "photos", applicant_name=self.name)
+		migrate_attach_to_r2(self, "photo_full_body", "photos", applicant_name=self.name)
+		migrate_attach_to_r2(self, "experience_video", "videos", applicant_name=self.name)
 
 	def autofill_from_passport(self):
 		"""Auto-parse the passport scan's MRZ on every upload/replacement and fill in currently-blank
