@@ -15,6 +15,8 @@
 import frappe
 from frappe.utils import getdate
 
+from agency_tracking.roles import INTERNAL_STAFF_ROLES
+
 MANAGEMENT_ROLES = {"Manager", "Admin", "Finance Manager", "System Manager"}
 
 
@@ -743,6 +745,105 @@ def export_transactions_xlsx(status=None, transaction_type=None, placement=None,
 	output.seek(0)
 
 	frappe.response["filename"] = f"transactions_report_{frappe.utils.today()}.xlsx"
+	frappe.response["filecontent"] = output.getvalue()
+	frappe.response["type"] = "download"
+
+
+# Column layout, sheet name, widths, and header fill colour (#9999FF) copied directly from
+# docs/Group_Schedule_Bio_Applicants_Excel_Template.xls (inspected via xlrd) -- this is a
+# fixed external bulk-upload format some downstream labor/visa authority consumes, not one of
+# this app's own branded reports, so it deliberately does NOT use _xlsx_formats/
+# _write_report_header above: no title row, no autofilter, no frozen header -- anything that
+# shifts row/column positions away from row 0 = headers would break whatever parses this on
+# the receiving end.
+_GROUP_SCHEDULE_BIO_HEADERS = [
+	"E.No", "First Name*", "Second Name", "Last Name*", "Passport Number*",
+	"Date of Birth* ", "Nationality*", "Date of Issue*", "Gender*",
+	"Place of Issue*", "Expiry Date*", "Applicant Mobile No.*", "Email ID*",
+]
+_GROUP_SCHEDULE_BIO_WIDTHS = [12.14, 11.0, 20.29, 13.86, 16.43, 14.86, 12.71, 14.14, 14.71, 14.0, 12.14, 25.29, 21.71]
+
+
+@frappe.whitelist()
+def export_group_schedule_bio_xlsx(applicants=None):
+	"""Given a list of Applicant names, fills them into the exact layout of
+	docs/Group_Schedule_Bio_Applicants_Excel_Template.xls (sheet "Bio_Applicant_Details", same
+	13 columns/order/widths/header colour) so the result can go straight to whatever authority
+	consumes that template, no manual reformatting. `applicants` accepts a list, a JSON-encoded
+	list, or a single Applicant name.
+	"""
+	if not (INTERNAL_STAFF_ROLES & set(frappe.get_roles())):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	if isinstance(applicants, str):
+		applicants = frappe.parse_json(applicants) if applicants.strip().startswith("[") else [applicants]
+	applicants = [a for a in (applicants or []) if a]
+	if not applicants:
+		frappe.throw("At least one applicant is required.", frappe.ValidationError)
+
+	rows = frappe.get_all(
+		"Applicant",
+		filters={"name": ["in", applicants]},
+		fields=[
+			"name", "first_name", "middle_name", "last_name", "passport_number",
+			"date_of_birth", "nationality", "passport_issue_date", "gender",
+			"passport_issue_place", "passport_expiry_date", "phone", "email",
+		],
+	)
+	row_map = {r.name: r for r in rows}
+	missing = [a for a in applicants if a not in row_map]
+	if missing:
+		frappe.throw(
+			f"Applicant(s) not found: {', '.join(missing)}. Zero data loss -- fix the list rather "
+			"than silently dropping them from the export.",
+			frappe.ValidationError,
+		)
+	# Preserve the caller's requested order, not frappe.get_all's DB order.
+	ordered = [row_map[a] for a in applicants]
+
+	import io
+	import xlsxwriter
+
+	output = io.BytesIO()
+	workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+	worksheet = workbook.add_worksheet("Bio_Applicant_Details")
+
+	header_fmt = workbook.add_format({
+		"bg_color": "#9999FF", "border": 1, "valign": "vcenter", "text_wrap": True,
+	})
+	cell_fmt = workbook.add_format({"border": 1, "valign": "vcenter"})
+	date_fmt = workbook.add_format({"border": 1, "valign": "vcenter", "num_format": "dd-mmm-yyyy"})
+
+	for col, (h, w) in enumerate(zip(_GROUP_SCHEDULE_BIO_HEADERS, _GROUP_SCHEDULE_BIO_WIDTHS)):
+		worksheet.write(0, col, h, header_fmt)
+		worksheet.set_column(col, col, w)
+
+	def _write_date(row, col, value):
+		if value:
+			worksheet.write_datetime(row, col, frappe.utils.get_datetime(value), date_fmt)
+		else:
+			worksheet.write_blank(row, col, None, cell_fmt)
+
+	for r_idx, a in enumerate(ordered):
+		row = r_idx + 1
+		worksheet.write_number(row, 0, r_idx + 1, cell_fmt)
+		worksheet.write(row, 1, a.first_name or "", cell_fmt)
+		worksheet.write(row, 2, a.middle_name or "", cell_fmt)
+		worksheet.write(row, 3, a.last_name or "", cell_fmt)
+		worksheet.write(row, 4, a.passport_number or "", cell_fmt)
+		_write_date(row, 5, a.date_of_birth)
+		worksheet.write(row, 6, a.nationality or "", cell_fmt)
+		_write_date(row, 7, a.passport_issue_date)
+		worksheet.write(row, 8, a.gender or "", cell_fmt)
+		worksheet.write(row, 9, a.passport_issue_place or "", cell_fmt)
+		_write_date(row, 10, a.passport_expiry_date)
+		worksheet.write(row, 11, a.phone or "", cell_fmt)
+		worksheet.write(row, 12, a.email or "", cell_fmt)
+
+	workbook.close()
+	output.seek(0)
+
+	frappe.response["filename"] = f"Group_Schedule_Bio_Applicants_{frappe.utils.today()}.xlsx"
 	frappe.response["filecontent"] = output.getvalue()
 	frappe.response["type"] = "download"
 
