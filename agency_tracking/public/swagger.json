@@ -5049,7 +5049,7 @@
           "Portal (Foreign Agency)"
         ],
         "summary": "Browse the candidate catalog",
-        "description": "Standard-track, CV Generated, not yet locked by anyone, matching the agency's own destination country. Non-PII fields only.",
+        "description": "Standard-track, CV Generated, not yet locked by anyone, matching the agency's own destination country. Non-PII fields only. (2026-09-21: photograph/photo_full_body/experience_video/passport_scan, when stored on R2, are returned as short-lived signed URLs -- 2h expiry -- not permanent links; refetch this endpoint rather than caching/reusing an old URL.)",
         "x-roles": [
           "Foreign Agency"
         ],
@@ -5300,6 +5300,60 @@
           },
           "417": {
             "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.report_api.export_group_schedule_bio_xlsx": {
+      "post": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Export a list of applicants into the Group Schedule Bio Applicants Excel template",
+        "description": "Given a list of Applicant names, fills them into the exact layout of docs/Group_Schedule_Bio_Applicants_Excel_Template.xls -- same sheet name (Bio_Applicant_Details), same 13 columns/order/widths/header colour (#9999FF), copied directly from the real template via xlrd inspection so the result drops into whatever downstream labor/visa authority consumes that template with no manual reformatting. Not one of this app's own branded reports (no title row/autofilter/frozen header) -- shifting anything from row 0 = headers would break the receiving end's parser. Throws a clear ValidationError listing any not-found applicant names rather than silently dropping them (zero-data-loss convention).",
+        "x-roles": [
+          "Registrar",
+          "Manager",
+          "Admin"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "applicants",
+            "in": "formData",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "Applicant names (docnames), e.g. [\"APP-00182\", \"APP-00181\"]. A JSON-encoded array string or a single Applicant name are also accepted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binary .xlsx file stream (Group_Schedule_Bio_Applicants_{date}.xlsx)",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (e.g. empty list, or an applicant name that doesn't exist)"
           }
         },
         "security": [
@@ -7741,7 +7795,7 @@
           "Portal (Foreign Agency)"
         ],
         "summary": "Get non-PII catalog candidate detail for foreign agency",
-        "description": "Returns rich profile (video, skills matrix, physical attributes, salary expectation) scoped to the foreign agency's destination country.",
+        "description": "Returns rich profile (video, skills matrix, physical attributes, salary expectation) scoped to the foreign agency's destination country. (2026-09-21: photograph/photo_full_body/experience_video/passport_scan, when stored on R2, are returned as short-lived signed URLs -- 2h expiry -- not permanent links; refetch this endpoint rather than caching/reusing an old URL.)",
         "x-roles": [
           "Foreign Agency",
           "Manager",
@@ -7836,7 +7890,7 @@
           "Portal (Foreign Agency)"
         ],
         "summary": "Get a candidate's photo (image)",
-        "description": "Serve a portal candidate's photograph/photo_full_body as an image to an agency allowed to view that candidate (same gate as get_candidate_detail). Agencies can't read the private File docs directly; passport/contract/visa are never served here. Local file streamed, R2 object redirected. Also callable via GET to back an <img src>. Returns image bytes.",
+        "description": "Serve a portal candidate's photograph/photo_full_body as an image to an agency allowed to view that candidate (same gate as get_candidate_detail). Agencies can't read the private File docs directly; passport/contract/visa are never served here. Local file streamed inline; an R2-stored photo (2026-09-21: R2 is a PRIVATE bucket now) is served via a redirect to a short-lived (2h) signed URL generated only after the permission gate above passes -- never a bare public bucket URL. Also callable via GET to back an <img src>. Returns image bytes or a 302 redirect.",
         "x-roles": [
           "Foreign Agency",
           "Manager",
