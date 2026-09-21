@@ -364,9 +364,19 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 	if not combined_amount:
 		return result
 
-	save_point = frappe.generate_hash(length=10)
-	frappe.db.savepoint(save_point)
+	# 2026-09-19 fix, found live during bulk test-data generation (~8% failure rate observed
+	# across 100 real calls): frappe.generate_hash() returns a lowercase hex string, and an
+	# unquoted MariaDB SAVEPOINT identifier that happens to look like scientific notation
+	# (digits, an "e", more digits -- e.g. "234e0744ce") isn't a valid identifier OR a valid
+	# number, so MariaDB raises a raw SQL syntax error. That error came from the savepoint()
+	# call itself, sitting BEFORE the try block below -- so it was never caught by the except
+	# clause it was supposed to feed into; the whole request failed instead of degrading to
+	# the intended "ticket saved, cost logging failed" warning. Fixed two ways: a "sp_" prefix
+	# guarantees the identifier can never parse as a number, and the savepoint() call itself now
+	# lives inside the try/except it was meant to be protected by.
+	save_point = f"sp_{frappe.generate_hash(length=10)}"
 	try:
+		frappe.db.savepoint(save_point)
 		fx_rate, fx_rate_date = get_fx_rate(combined_currency)
 		fx_rate = Decimal(str(fx_rate))
 		description = f"Ticket cost ({ticket_amount}) + corridor known fees ({fee_total}) for {placement_name}"
