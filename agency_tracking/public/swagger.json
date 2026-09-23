@@ -464,7 +464,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "Open a new Applicant file at Draft",
-        "description": "Draft floor: full_name, gender, nationality, entry_track. Accepts any other Applicant field as additional form data.",
+        "description": "Draft floor: full_name, gender, nationality, entry_track. Accepts any other Applicant field as additional form data. Names are stored in ALL CAPS: first_name/middle_name/last_name/full_name/place_of_birth/passport_issue_place are uppercased and whitespace-collapsed on every save, and full_name is always rebuilt from first/middle/last when any part is set (a sent full_name is only kept when there are no parts).",
         "x-roles": [
           "Registrar",
           "Manager",
@@ -1039,7 +1039,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "Edit an Applicant at Draft or Registered",
-        "description": "Does not change status -- use register_applicant for that. If entry_track changes while Registered/CV Generated, forces a regression to Draft first (cycle_number bumps automatically). A destination_country that differs from the current one is checked against active Applicant Country Bans (re-submitting the unchanged country is not re-checked, so routine edits of a banned applicant still save).",
+        "description": "Does not change status -- use register_applicant for that. If entry_track changes while Registered/CV Generated, forces a regression to Draft first (cycle_number bumps automatically). A destination_country that differs from the current one is checked against active Applicant Country Bans (re-submitting the unchanged country is not re-checked, so routine edits of a banned applicant still save). Names are stored in ALL CAPS: first_name/middle_name/last_name/full_name/place_of_birth/passport_issue_place are uppercased and whitespace-collapsed on every save, and full_name is always rebuilt from first/middle/last when any part is set (a sent full_name is only kept when there are no parts).",
         "x-roles": [
           "Registrar",
           "Manager",

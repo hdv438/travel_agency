@@ -61,6 +61,11 @@ FIELD_FLOOR = {
 # on repeated empty strings across multiple Draft rows.
 UNIQUE_FIELDS = ["passport_number", "national_id", "labor_id"]
 
+# 2026-09-23: stored in ALL CAPS, whitespace-collapsed -- the passport prints all of these in
+# capitals, and the CV/invoices/reports/portal all display them as stored. The passport reader
+# already emitted uppercase names; typed entry didn't, so it's normalized here on every save.
+UPPERCASE_FIELDS = ("first_name", "middle_name", "last_name", "full_name", "place_of_birth", "passport_issue_place")
+
 
 class Applicant(Document):
 	def before_validate(self):
@@ -83,6 +88,7 @@ class Applicant(Document):
 				self.set(fieldname, None)
 
 	def validate(self):
+		self.normalize_uppercase_fields()
 		self.set_full_name()
 		self.validate_passport_dates()
 		self.validate_field_floor()
@@ -170,7 +176,9 @@ class Applicant(Document):
 			current = self.get(fieldname)
 			if not current:
 				self.set(fieldname, value)
-			elif str(current) != str(value):
+			elif str(current).strip().upper() != str(value).strip().upper():
+				# Case-insensitive: UPPERCASE_FIELDS are stored in caps, so a re-scan reading the
+				# same text in another case is not a disagreement.
 				# A replaced scan disagrees with data already on file -- surface it, don't clobber.
 				needs_review = True
 
@@ -198,12 +206,19 @@ class Applicant(Document):
 		today = frappe.utils.getdate()
 		self.age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
+	def normalize_uppercase_fields(self):
+		for fieldname in UPPERCASE_FIELDS:
+			value = self.get(fieldname)
+			if isinstance(value, str):
+				self.set(fieldname, " ".join(value.split()).upper() or None)
+
 	def set_full_name(self):
-		"""Some clients (the split-name intake form) never set full_name directly --
-		derive it from first/middle/last whenever full_name itself is blank. Clients that
-		already send full_name directly (e.g. the built-in SPA) are untouched."""
-		if not self.full_name and self.first_name:
-			self.full_name = " ".join(filter(None, [self.first_name, self.middle_name, self.last_name]))
+		"""full_name is always derived from first/middle/last when any part is set (2026-09-23),
+		so correcting one part can't leave a stale full_name behind -- previously it was only
+		filled when blank. A client that sends only full_name, with no parts, keeps it as sent."""
+		parts = [self.first_name, self.middle_name, self.last_name]
+		if any(parts):
+			self.full_name = " ".join(filter(None, parts))
 
 	def validate_field_floor(self):
 		required = FIELD_FLOOR.get((self.entry_track, self.status))
