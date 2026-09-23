@@ -9,9 +9,26 @@
 import frappe
 
 from agency_tracking.pagination import count_rows, page_args, paged_result
-from agency_tracking.state_machine import transition
+from agency_tracking.state_machine import LIFECYCLE_FIELDS, transition
 
 CYCLE_REGRESSION_STATUSES = ("Registered", "CV Generated")
+
+# Set only by the system, never by an edit call (2026-09-23 fix: update_applicant used to save any
+# field it was sent -- confirmed live, it could clear active_placement, detaching a placed applicant
+# so another agency could select her, or rewrite cycle_number / fee_transaction). entry_track stays
+# editable here on purpose (update_applicant handles its cycle regression below).
+APPLICANT_SYSTEM_FIELDS = (LIFECYCLE_FIELDS - {"entry_track"}) | {
+	"cycle_number",
+	"fee_transaction",
+	"fee_log",
+	"age",
+	"full_name",
+	"passport_issue_date",
+	"owner",
+	"creation",
+	"modified",
+	"modified_by",
+}
 
 
 @frappe.whitelist()
@@ -20,11 +37,11 @@ def create_applicant(**data):
 	(doctype-level create permission, Part G)."""
 	if not frappe.has_permission("Applicant", "create"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
-	data = dict(data)
-	# passport_issue_date is read_only/derived -- see the matching drop in update_applicant.
-	data.pop("passport_issue_date", None)
+	# System fields (APPLICANT_SYSTEM_FIELDS) are never taken from the caller, and a new file always
+	# starts at Draft -- a caller-supplied status would skip register_applicant's checks.
+	data = {k: v for k, v in data.items() if k not in APPLICANT_SYSTEM_FIELDS or k == "full_name"}
 	data["doctype"] = "Applicant"
-	data.setdefault("status", "Draft")
+	data["status"] = "Draft"
 	data.setdefault("entry_track", "Standard")
 	if data.get("nationality") == "Ethiopian":
 		data["nationality"] = "Ethiopia"
@@ -129,11 +146,7 @@ def update_applicant(applicant_name=None, override_ban=False, override_reason=No
 	doc = frappe.get_doc("Applicant", applicant_name)
 	if not doc.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
-	data = dict(data)
-	data.pop("status", None)
-	data.pop("doctype", None)
-	data.pop("name", None)
-	data.pop("passport_issue_date", None)
+	data = {k: v for k, v in data.items() if k not in APPLICANT_SYSTEM_FIELDS and k not in ("doctype", "cmd")}
 
 	new_country = data.get("destination_country")
 	if new_country and new_country != doc.destination_country:
