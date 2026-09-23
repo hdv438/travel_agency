@@ -732,6 +732,13 @@
             "in": "formData",
             "type": "string",
             "required": false
+          },
+          {
+            "name": "active_only",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "default": true
           }
         ],
         "responses": {
@@ -757,7 +764,8 @@
           {
             "sessionCookie": []
           }
-        ]
+        ],
+        "description": "Active bans only by default; pass active_only=0 to include lifted ones (ban history). Each row: name, applicant, country, active, set_by, set_on, reason, lifted_by, lifted_on, lift_reason."
       }
     },
     "/api/method/agency_tracking.applicant_api.remove_country_ban": {
@@ -766,7 +774,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "Lift a country ban",
-        "description": "Delete permission on Applicant Country Ban is Manager/Admin/System Manager only -- Registrar/Complaint Manager can set a ban but not lift one.",
+        "description": "Lifts (deactivates) the ban rather than deleting it: the row stays with active=0 plus lifted_by/lifted_on/lift_reason, so ban history is auditable. Manager/Admin/System Manager only (write permission) -- Registrar/Complaint Manager can set a ban but not lift one. Pass ban_name, or applicant_name + country to lift that pair's active ban.",
         "x-roles": [
           "Manager",
           "Admin"
@@ -780,7 +788,27 @@
             "name": "ban_name",
             "in": "formData",
             "type": "string",
-            "required": true
+            "required": false,
+            "description": "ACB-xxxxx. Either this or applicant_name + country."
+          },
+          {
+            "name": "applicant_name",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "country",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "lift_reason",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Why the ban is being lifted; stored on the row and sent in the Manager notification"
           }
         ],
         "responses": {
@@ -792,8 +820,17 @@
                 "message": {
                   "type": "object",
                   "properties": {
-                    "deleted": {
-                      "type": "string"
+                    "lifted": {
+                      "type": "string",
+                      "description": "The ban name"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "success",
+                        "already_lifted",
+                        "not_found"
+                      ]
                     }
                   }
                 }
@@ -802,6 +839,9 @@
           },
           "403": {
             "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Neither ban_name nor applicant_name + country given"
           }
         },
         "security": [
@@ -865,7 +905,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "Draft -> Registered",
-        "description": "Field-floor and medical checks run inside Applicant.validate(), triggered by the sanctioned transition() path.",
+        "description": "Field-floor and medical checks run inside Applicant.validate(), triggered by the sanctioned transition() path. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides.",
         "x-roles": [
           "Write access to the Applicant"
         ],
@@ -879,6 +919,20 @@
             "in": "formData",
             "type": "string",
             "required": true
+          },
+          {
+            "name": "override_ban",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "description": "Manager/Admin only, to push past an active country ban on the applicant's destination_country"
+          },
+          {
+            "name": "override_reason",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Required if override_ban is true"
           }
         ],
         "responses": {
@@ -894,7 +948,7 @@
             }
           },
           "403": {
-            "description": "Not permitted (role/permission check failed)"
+            "description": "Not permitted, or the applicant is actively banned from their destination_country (Applicant Country Ban) -- retry as Manager/Admin with override_ban + override_reason"
           },
           "417": {
             "description": "Validation error (business rule violated)"
@@ -913,7 +967,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "Restart a Cancelled Applicant",
-        "description": "Cancelled -> Draft or Registered. cycle_number bumps automatically. Restarting straight to Registered fails naturally if the field floor isn't actually satisfied.",
+        "description": "Cancelled -> Draft or Registered. cycle_number bumps automatically. Restarting straight to Registered fails naturally if the field floor isn't actually satisfied. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides -- checked on every restart, since this is how a cancelled applicant re-enters the pipeline.",
         "x-roles": [
           "Write access to the Applicant"
         ],
@@ -937,6 +991,20 @@
               "Draft",
               "Registered"
             ]
+          },
+          {
+            "name": "override_ban",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "description": "Manager/Admin only, to push past an active country ban on the applicant's destination_country"
+          },
+          {
+            "name": "override_reason",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Required if override_ban is true"
           }
         ],
         "responses": {
@@ -952,7 +1020,7 @@
             }
           },
           "403": {
-            "description": "Not permitted (role/permission check failed)"
+            "description": "Not permitted, or the applicant is actively banned from their destination_country (Applicant Country Ban) -- retry as Manager/Admin with override_ban + override_reason"
           },
           "417": {
             "description": "Validation error (business rule violated)"
@@ -971,7 +1039,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "Edit an Applicant at Draft or Registered",
-        "description": "Does not change status -- use register_applicant for that. If entry_track changes while Registered/CV Generated, forces a regression to Draft first (cycle_number bumps automatically). destination_country changes are checked against Applicant Country Ban.",
+        "description": "Does not change status -- use register_applicant for that. If entry_track changes while Registered/CV Generated, forces a regression to Draft first (cycle_number bumps automatically). A destination_country that differs from the current one is checked against active Applicant Country Bans (re-submitting the unchanged country is not re-checked, so routine edits of a banned applicant still save).",
         "x-roles": [
           "Registrar",
           "Manager",
@@ -2792,7 +2860,7 @@
           "CV Generation"
         ],
         "summary": "Generate and attach the official Agency CV PDF",
-        "description": "Standard track, Registered status only. Renders via a Frappe Print Format, mirrors to Cloudflare R2 (falls back to a local private file if Storage Settings isn't configured). Moves the Applicant to CV Generated.",
+        "description": "Standard track, Registered status only. Renders via a Frappe Print Format, mirrors to Cloudflare R2 (falls back to a local private file if Storage Settings isn't configured). Moves the Applicant to CV Generated. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides -- CV Generated is what makes an applicant visible in the agency portal.",
         "x-roles": [
           "Write access to the Applicant"
         ],
@@ -2806,6 +2874,20 @@
             "in": "formData",
             "type": "string",
             "required": true
+          },
+          {
+            "name": "override_ban",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "description": "Manager/Admin only, to push past an active country ban on the applicant's destination_country"
+          },
+          {
+            "name": "override_reason",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Required if override_ban is true"
           }
         ],
         "responses": {
@@ -2829,7 +2911,7 @@
             }
           },
           "403": {
-            "description": "Not permitted (role/permission check failed)"
+            "description": "Not permitted, or the applicant is actively banned from their destination_country (Applicant Country Ban) -- retry as Manager/Admin with override_ban + override_reason"
           },
           "417": {
             "description": "Validation error (business rule violated)"
@@ -5049,7 +5131,7 @@
           "Portal (Foreign Agency)"
         ],
         "summary": "Browse the candidate catalog",
-        "description": "Standard-track, CV Generated, not yet locked by anyone, matching the agency's own destination country. Non-PII fields only. (2026-09-21: photograph/photo_full_body/experience_video/passport_scan, when stored on R2, are returned as short-lived signed URLs -- 2h expiry -- not permanent links; refetch this endpoint rather than caching/reusing an old URL.)",
+        "description": "Standard-track, CV Generated, not yet locked by anyone, matching the agency's own destination country. Non-PII fields only. (2026-09-21: photograph/photo_full_body/experience_video/passport_scan, when stored on R2, are returned as short-lived signed URLs -- 2h expiry -- not permanent links; refetch this endpoint rather than caching/reusing an old URL.) Applicants with an active country ban on their destination_country are excluded.",
         "x-roles": [
           "Foreign Agency"
         ],
@@ -5090,7 +5172,7 @@
           "Portal (Foreign Agency)"
         ],
         "summary": "Select a candidate (creates a Placement)",
-        "description": "Atomic, globally exclusive -- row-locked so two concurrent selections can't both succeed. free_replacement_for_complaint uses an approved free-replacement credit instead of billing normally.",
+        "description": "Atomic, globally exclusive -- row-locked so two concurrent selections can't both succeed. free_replacement_for_complaint uses an approved free-replacement credit instead of billing normally. Refused (403) if the applicant has an active country ban on their destination_country (no override on this endpoint).",
         "x-roles": [
           "Foreign Agency (own country's catalog only)"
         ],
