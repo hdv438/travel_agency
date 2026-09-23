@@ -9177,6 +9177,257 @@
           }
         ]
       }
+    },
+    "/api/method/agency_tracking.clearance_grid.get_clearance_grid_columns": {
+      "post": {
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "Clearance"
+        ],
+        "summary": "Columns of one clearance-step grid, with which ones the caller may edit",
+        "description": "Excel-like clearance grid (client #11). Returns [{field,label,type,options,editable}] -- read-only info columns (step, applicant, passport, placement status...) plus this step_type's editable columns. `editable` is for the calling user: management and the step_type's own role edit everything; LMIS applicant columns (national_id, labor_id, coc_status, exam_date, emergency contact) need an LMIS role or Manager/Admin; a Clearance Officer edits only rows assigned to them (enforced on save). The status column's options are forward moves only -- going back is reopen_clearance_step (reason popup), never a cell.",
+        "x-roles": [
+          "Any internal staff; editability varies by role"
+        ],
+        "parameters": [
+          {
+            "name": "step_type",
+            "in": "formData",
+            "type": "string",
+            "required": true,
+            "enum": [
+              "LMIS Clearance",
+              "Kuwait LMIS",
+              "Taeshir",
+              "Telesign",
+              "Embassy",
+              "Kuwait Embassy"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "editable": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.clearance_grid.list_clearance_grid": {
+      "post": {
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "Clearance"
+        ],
+        "summary": "Rows of one clearance-step grid (step + applicant + current Injaz attempt), paged",
+        "description": "One row per Clearance Step of step_type, oldest first, with applicant columns joined (full_name, passport_number; on LMIS grids also the LMIS applicant fields), Taeshir's current Injaz attempt (injaz_application_id, appointment_date, injaz_payment_status, injaz_paid_date, injaz_outcome), Wakala / Police Ashara fields, and `modified` + `applicant_modified` -- send `modified` back with each changed row so a row edited by someone else meanwhile is refused instead of overwritten. Steps of Departed/Cancelled placements are hidden unless include_closed=1. Same row scoping as other Clearance Step lists.",
+        "x-roles": [
+          "Any internal staff (rows scoped by role)"
+        ],
+        "parameters": [
+          {
+            "name": "step_type",
+            "in": "formData",
+            "type": "string",
+            "required": true,
+            "enum": [
+              "LMIS Clearance",
+              "Kuwait LMIS",
+              "Taeshir",
+              "Telesign",
+              "Embassy",
+              "Kuwait Embassy"
+            ]
+          },
+          {
+            "name": "status",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "One status, or a JSON list e.g. [\"Pending\",\"In Progress\"]"
+          },
+          {
+            "name": "search",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Applicant name, passport number or APP id (partial match)"
+          },
+          {
+            "name": "include_closed",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 0
+          },
+          {
+            "name": "limit_start",
+            "in": "formData",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "limit_page_length",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "description": "Default 100, max 500"
+          },
+          {
+            "name": "with_total",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "description": "1 -> {data, total_count}"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        }
+      }
+    },
+    "/api/method/agency_tracking.clearance_grid.save_clearance_grid": {
+      "post": {
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "Clearance"
+        ],
+        "summary": "Save many rows' changed cells; each cell runs the same action as its button",
+        "description": "changes = [{name, modified, fields:{column: value}, override_reason?}] (max 200 rows; send only changed cells). Every cell goes through the real action -- status -> start/complete/submit/stamp/reject, Wakala -> record_wakala_payment, Injaz paid -> record_injaz_payment, appointment/Injaz ID -> set_taeshir_appointment, Police Ashara -> record_police_ashara, LMIS applicant fields -> update_applicant_for_lmis -- so fees, gates (Injaz Paid before Taeshir Complete, Wakala Paid before Submit/Stamp, Taeshir Complete before Stamp), notifications and audit log are identical to the buttons. Within a row, data cells apply before the status move, so 'Injaz Paid + Complete' or 'Wakala Paid + Submitted' work in one save. Rejected needs rejection_remark in the same row. Moving a step backwards is refused (use reopen_clearance_step). Each row is all-or-nothing and independent. Result per row, in order: {name, ok:true, row} or {name, ok:false, error, field, conflict?, row} -- `row` is the current grid row either way; conflict=true means the row changed after it was loaded (reload it). override_reason = Manager/Admin override for Wakala unpaid at Submit/Stamp.",
+        "x-roles": [
+          "Management; the step_type's own role; Clearance Officer on assigned rows"
+        ],
+        "parameters": [
+          {
+            "name": "changes",
+            "in": "formData",
+            "type": "string",
+            "required": true,
+            "description": "JSON list of row changes"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "ok": {
+                        "type": "boolean"
+                      },
+                      "error": {
+                        "type": "string"
+                      },
+                      "field": {
+                        "type": "string"
+                      },
+                      "conflict": {
+                        "type": "boolean"
+                      },
+                      "row": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        }
+      }
     }
   },
   "definitions": {
