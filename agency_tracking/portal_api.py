@@ -72,7 +72,20 @@ PORTAL_FIELDS = [
 	"skill_elderly_care",
 	"skill_driving",
 	"skill_sewing",
+	# Only ever returned as "FIT" -- see _portal_medical_status. UNFIT candidates are excluded from
+	# the portal entirely, and Pending/blank is dropped rather than shown (2026-09-23).
+	"medical_status",
 ]
+
+
+def _portal_medical_status(rows):
+	"""2026-09-23 product decision: agencies see medical_status only when it's FIT. Anything else
+	(Pending, blank) is removed from the row, not shown as a value -- medical detail is mostly a
+	post-selection concern (Placement.medical_selected_status / medical_2_status)."""
+	for row in rows:
+		if row and row.get("medical_status") != "FIT":
+			row.pop("medical_status", None)
+	return rows
 
 # Kept as an alias, not a narrower list -- get_candidate_detail used to return a richer set than
 # list_portal_candidates; now they're identical (see PORTAL_FIELDS' own comment). Two names are
@@ -195,6 +208,9 @@ def list_portal_candidates(target_job=None, gender=None, **kwargs):
 		# is set and they must leave every agency's marketplace. Enforced backend-side here (not in
 		# the frontend) so a placed/reserved candidate is never returned to an unrelated agency.
 		"active_placement": ["is", "not set"],
+		# A medically UNFIT applicant never appears in the portal (2026-09-23) -- normally they can't
+		# reach CV Generated at all (cv_generation_gate), this covers one marked UNFIT afterwards.
+		"medical_status": ["!=", "UNFIT"],
 	}
 	is_internal = frappe.session.user == "Administrator" or bool(
 		{"Manager", "Admin", "System Manager"} & set(frappe.get_roles())
@@ -239,7 +255,7 @@ def list_portal_candidates(target_job=None, gender=None, **kwargs):
 	from agency_tracking.storage_engine import resolve_r2_fields
 
 	resolve_r2_fields(rows, ["photograph", "photo_full_body", "experience_video", "passport_scan"])
-	return rows
+	return _portal_medical_status(rows)
 
 
 def _assert_can_view_candidate(applicant_name):
@@ -255,7 +271,7 @@ def _assert_can_view_candidate(applicant_name):
 	scope = frappe.db.get_value(
 		"Applicant",
 		applicant_name,
-		["name", "status", "entry_track", "destination_country", "active_placement"],
+		["name", "status", "entry_track", "destination_country", "active_placement", "medical_status"],
 		as_dict=True,
 	)
 	if not scope:
@@ -271,6 +287,7 @@ def _assert_can_view_candidate(applicant_name):
 			and scope.status == "CV Generated"
 			and not scope.active_placement
 			and scope.destination_country == contractor.country
+			and scope.medical_status != "UNFIT"
 		)
 		if not (available or owns_placement):
 			frappe.throw("Not permitted.", frappe.PermissionError)
@@ -292,7 +309,7 @@ def get_candidate_detail(applicant_name=None, **kwargs):
 	from agency_tracking.storage_engine import resolve_r2_fields
 
 	resolve_r2_fields([row], ["photograph", "photo_full_body", "experience_video", "passport_scan"])
-	return row
+	return _portal_medical_status([row])[0]
 
 
 # The ONLY candidate images an agency may load. Sensitive files (passport_scan, contract, visa) are
@@ -367,6 +384,15 @@ def select_candidate(applicant_name=None, free_replacement_for_complaint=None, c
 		)
 	if applicant.destination_country != contractor.country and frappe.session.user != "Administrator" and not ({"Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
+	if applicant.medical_status == "UNFIT":
+		# Never in the listing (2026-09-23); this catches a stale page. Same generic wording to an
+		# agency as the ban backstop below -- the medical result isn't disclosed to them.
+		frappe.throw(
+			f"{applicant_name} is medically UNFIT and cannot be selected."
+			if _is_internal_placement_reader()
+			else "This candidate is no longer available.",
+			frappe.ValidationError,
+		)
 
 	# Backstop (2026-09-22): list_portal_candidates already excludes a banned applicant, but a
 	# stale/cached portal page could still submit a select for one banned since it rendered. No

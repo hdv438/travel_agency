@@ -140,6 +140,13 @@ def generate_cv(applicant_name=None, override_ban=False, override_reason=None, *
 		cv_name = frappe.db.get_value("CV Record", {"applicant": applicant_name}, "name") or "CV-RECORD"
 		return {"cv_record": cv_name, "applicant_status": "CV Generated"}
 
+	if applicant.medical_status == "UNFIT":
+		# 2026-09-23: hard block (no override) -- see state_machine.cv_generation_gate.
+		frappe.throw(
+			f"{applicant_name} is medically UNFIT -- a CV cannot be generated, so they won't appear in the agency portal.",
+			frappe.ValidationError,
+		)
+
 	from agency_tracking.applicant_api import _check_country_ban_or_throw
 	_check_country_ban_or_throw(applicant_name, applicant.destination_country, override_ban, override_reason, action="Generate CV")
 

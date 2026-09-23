@@ -302,9 +302,14 @@ def cv_generation_gate(applicant):
 	until musaned_status == ALTEYAZECHEM) and the musaned_status field itself have both been
 	removed per direct instruction -- Musaned tracking is no longer part of this system at all.
 	"""
-	if applicant.entry_track == "Standard":
-		return True
-	return f"only Standard-track applicants generate a CV (this applicant is {applicant.entry_track})."
+	if applicant.entry_track != "Standard":
+		return f"only Standard-track applicants generate a CV (this applicant is {applicant.entry_track})."
+	# 2026-09-23: a medically UNFIT applicant must never reach the agency portal, and CV Generated
+	# is what puts them there. cv_api.generate_cv refuses first with a clearer message; this is
+	# the backstop for any other path into CV Generated.
+	if applicant.medical_status == "UNFIT":
+		return "medically UNFIT applicants cannot have a CV generated."
+	return True
 
 
 STAGE_GATES[("Registered", "CV Generated")] = cv_generation_gate
