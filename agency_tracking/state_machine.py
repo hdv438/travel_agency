@@ -495,9 +495,13 @@ CYCLE_BUMP_FROM_STATUSES = {"Registered", "CV Generated", "Cancelled"}
 
 def bump_cycle_number(applicant, from_status):
 	if from_status in CYCLE_BUMP_FROM_STATUSES:
-		frappe.db.set_value(
-			"Applicant", applicant.name, "cycle_number", (applicant.cycle_number or 1) + 1
-		)
+		# Runs after transition()'s doc.save(), so also sync the in-memory doc -- callers return
+		# applicant.as_dict() (restart_applicant, update_applicant), which otherwise reported the
+		# pre-bump cycle_number. update_modified=False keeps doc.modified matching the row, so a
+		# later save of this same doc object in the request doesn't hit a TimestampMismatchError.
+		new_cycle = (applicant.cycle_number or 1) + 1
+		frappe.db.set_value("Applicant", applicant.name, "cycle_number", new_cycle, update_modified=False)
+		applicant.cycle_number = new_cycle
 
 
 TRANSITION_SIDE_EFFECTS[("Applicant", "Draft")] = bump_cycle_number
