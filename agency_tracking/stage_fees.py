@@ -60,9 +60,9 @@ def _final_injaz_attempt(step):
 def _record_fee(step, placement, row, injaz_attempt=None):
 	"""Insert one auto-Approved Expense for `row` unless this (step, fee, attempt) already has
 	one -- in any status, so a row Finance deliberately voided is never silently re-created.
-	Best-effort: a failure (e.g. no FX rate for the fee's currency) is logged and rolled back to
-	a savepoint, never blocking the step itself; stage fees are re-attempted at ticketing
-	(post_missing_stage_fees)."""
+	Best-effort: a failure (only possible when the fee's currency has never had any FX rate --
+	get_fx_rate falls back to the latest known rate otherwise) is logged to the Error Log and
+	rolled back to a savepoint, never blocking the step itself. Not retried automatically."""
 	attempt_name = injaz_attempt.name if injaz_attempt else None
 	key = {
 		"clearance_step": step.name,
@@ -145,8 +145,9 @@ def post_forfeited_injaz_fee(step, attempt):
 
 def post_missing_stage_fees(placement_name):
 	"""Record any fee still missing for this placement's completed steps, including forfeited
-	paid Injaz attempts. Idempotent -- used by the deploy catch-up patch and as a safety net at
-	ticketing (retries fees whose first attempt failed, e.g. a missing FX rate)."""
+	paid Injaz attempts. Idempotent. Only used by the one-time deploy catch-up
+	(patches/stage_fees_setup.py) -- deliberately NOT called at ticketing, where it would charge
+	the current amount for a fee that was 0 when its step completed."""
 	if not _placement_for_fees(placement_name):
 		return []
 	posted = []

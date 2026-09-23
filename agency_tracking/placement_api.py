@@ -311,9 +311,9 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 	Placement.corridor_fees_logged, which now means "ticket cost logged".
 
 	2026-09-23 (client item #12): the corridor's known fees are no longer summed in here -- each
-	is recorded on its own when its clearance step completes (stage_fees.py). This call only runs
-	stage_fees.post_missing_stage_fees as a safety net, retrying any fee whose recording failed
-	earlier (e.g. an FX rate that was missing at the time).
+	is recorded on its own, only when its clearance step completes (stage_fees.py). Ticketing
+	deliberately doesn't re-check them: it couldn't tell a fee that was 0 at the time from one
+	that failed, and would charge the later amount for the former.
 
 	2026-08-30 fix (backend-issues #05, still applies): ticket_number/flight_date are pure
 	logistics fields with no FX dependency -- the cost-logging sub-step runs inside its own DB
@@ -336,9 +336,6 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 	from frappe.utils import flt
 
 	from agency_tracking.finance_engine import get_fx_rate
-	from agency_tracking.stage_fees import post_missing_stage_fees
-
-	post_missing_stage_fees(placement.name)
 
 	placement.ticket_number = ticket_number
 	placement.flight_date = flight_date
