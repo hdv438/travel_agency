@@ -10,6 +10,7 @@ from agency_tracking.contract_parser import parse_contract_file, parse_visa_file
 from agency_tracking.state_machine import (
 	assert_placement_not_terminal,
 	lock_applicant_row,
+	log_action,
 	strip_lifecycle_fields,
 	transition,
 )
@@ -303,148 +304,195 @@ def advance_placement(placement_name=None, new_status=None, override_reason=None
 	).as_dict()
 
 
+TICKET_FEE_TYPE = "Ticket"
+RESCHEDULE_TICKET_FEE_TYPE = "Ticket (Internal Reschedule)"
+
+
+def _require_etb(currency, what):
+	"""Ticket and reschedule costs are always paid in Birr (2026-09-23 product decision)."""
+	if currency and currency != "ETB":
+		frappe.throw(f"{what} is always in ETB (got {currency}).", frappe.ValidationError)
+
+
+def _record_ticket_expense(placement, amount, fee_type, description):
+	"""One auto-Approved ETB Expense for a ticket we paid for. System-recorded from the ticketer's
+	own figure, not a discretionary staff entry -- skips Finance review (same precedent as
+	finance_engine.accrue_commission's Commission transaction)."""
+	from decimal import Decimal
+
+	from frappe.utils import today
+
+	return frappe.get_doc(
+		{
+			"doctype": "Applicant Transaction",
+			"applicant": placement.applicant,
+			"placement": placement.name,
+			"transaction_type": "Expense",
+			"amount_original": Decimal(str(amount)),
+			"currency_original": "ETB",
+			"fx_rate": Decimal("1"),
+			"fx_rate_date": today(),
+			"description": description,
+			"stage_logged_at": "Ticketing",
+			"fee_type": fee_type,
+			"logged_by": frappe.session.user,
+			"status": "Approved",
+		}
+	).insert(ignore_permissions=True).name
+
+
+def _correct_ticket_expense(txn_name, amount):
+	"""Edit a ticket/reschedule expense's amount in place (a price correction is the same ticket,
+	never a second ledger row). Returns a warning string instead when the row can't be edited."""
+	from frappe.utils import flt
+
+	txn = frappe.get_doc("Applicant Transaction", txn_name)
+	if txn.status in ("Voided", "Rejected"):
+		return f"{txn.name} is {txn.status}, so its amount wasn't changed -- ask Finance to record the corrected cost."
+	if flt(amount) <= 0:
+		return f"A ticket cost can't be corrected to 0 -- ask Finance to void {txn.name} instead."
+	if flt(txn.amount_original) == flt(amount):
+		return None
+	old = txn.amount_original
+	txn.amount_original = amount
+	txn.save(ignore_permissions=True)
+	log_action("Applicant Transaction", txn.name, f"{txn.fee_type} cost corrected {old} -> {amount} ETB")
+	return None
+
+
 @frappe.whitelist()
 def record_ticket_details(placement_name=None, ticket_number=None, flight_date=None, ticket_cost=None, currency=None, **kwargs):
-	"""Ticketer role. ticket_cost auto-logs ONE already-Approved Applicant Transaction expense the
-	first time this is called for a placement (a known figure, no Finance approval needed).
-	Re-saving ticket details later (e.g. correcting the ticket number) does NOT re-log -- see
-	Placement.corridor_fees_logged, which now means "ticket cost logged".
+	"""Ticketer role. ticket_cost (always ETB -- any other currency is rejected) is recorded as ONE
+	auto-Approved Applicant Transaction expense (fee_type "Ticket") the first time it's non-zero.
+	Calling again with a different ticket_cost corrects that same row's amount (a price
+	correction, not a new ticket); correcting only the ticket number/flight date touches no money.
+	A new ticket bought because WE rescheduled is record_reschedule(cause="Internal") -- its own row.
 
 	2026-09-23 (client item #12): the corridor's known fees are no longer summed in here -- each
 	is recorded on its own, only when its clearance step completes (stage_fees.py). Ticketing
 	deliberately doesn't re-check them: it couldn't tell a fee that was 0 at the time from one
-	that failed, and would charge the later amount for the former.
-
-	2026-08-30 fix (backend-issues #05, still applies): ticket_number/flight_date are pure
-	logistics fields with no FX dependency -- the cost-logging sub-step runs inside its own DB
-	savepoint, so a missing FX rate only unwinds the failed expense insert, not the ticket fields
-	saved just above. The cost log is best-effort from here on: failure is reported back to the
-	caller as a warning, not a fatal error for the whole call."""
+	that failed, and would charge the later amount for the former."""
 	if not placement_name:
 		frappe.throw("placement_name is required.", frappe.ValidationError)
 	if not ticket_number:
 		frappe.throw("ticket_number is required.", frappe.ValidationError)
 	if not flight_date:
 		frappe.throw("flight_date is required.", frappe.ValidationError)
+	_require_etb(currency, "Ticket cost")
 	placement = frappe.get_doc("Placement", placement_name)
 	if not placement.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	assert_placement_not_terminal(placement)
 
-	from decimal import Decimal
-
 	from frappe.utils import flt
 
-	from agency_tracking.finance_engine import get_fx_rate_or_none
-
+	previous_cost = placement.ticket_cost
 	placement.ticket_number = ticket_number
 	placement.flight_date = flight_date
 	placement.ticket_cost = ticket_cost
 	placement.save(ignore_permissions=True)
 
 	result = placement.as_dict()
-	if placement.corridor_fees_logged:
-		return result
-
 	ticket_amount = flt(ticket_cost)
-	combined_currency = currency or "ETB"
-	combined_amount = Decimal(str(ticket_amount))
-	if not combined_amount:
+	if not placement.corridor_fees_logged:
+		if ticket_amount > 0:
+			_record_ticket_expense(placement, ticket_amount, TICKET_FEE_TYPE, f"Ticket cost ({ticket_amount} ETB) for {placement_name}")
+			placement.db_set("corridor_fees_logged", 1, update_modified=False)
+			result["corridor_fees_logged"] = 1
 		return result
 
-	# 2026-09-19 fix, found live during bulk test-data generation (~8% failure rate observed
-	# across 100 real calls): frappe.generate_hash() returns a lowercase hex string, and an
-	# unquoted MariaDB SAVEPOINT identifier that happens to look like scientific notation
-	# (digits, an "e", more digits -- e.g. "234e0744ce") isn't a valid identifier OR a valid
-	# number, so MariaDB raises a raw SQL syntax error. That error came from the savepoint()
-	# call itself, sitting BEFORE the try block below -- so it was never caught by the except
-	# clause it was supposed to feed into; the whole request failed instead of degrading to
-	# the intended "ticket saved, cost logging failed" warning. Fixed two ways: a "sp_" prefix
-	# guarantees the identifier can never parse as a number, and the savepoint() call itself now
-	# lives inside the try/except it was meant to be protected by.
-	save_point = f"sp_{frappe.generate_hash(length=10)}"
-	try:
-		frappe.db.savepoint(save_point)
-		# No FX rate ever recorded for this currency: record it anyway, in its own currency,
-		# awaiting conversion (finance_engine.convert_awaiting_fx, 2026-09-23) -- previously the
-		# ticket cost was dropped with a "set a rate, then call again" warning.
-		fx_rate, fx_rate_date = get_fx_rate_or_none(combined_currency)
-		awaiting_fx = fx_rate is None
-		fx_rate = Decimal("0") if awaiting_fx else Decimal(str(fx_rate))
-		description = f"Ticket cost ({ticket_amount}) for {placement_name}"
-		frappe.get_doc(
-			{
-				"doctype": "Applicant Transaction",
-				"placement": placement_name,
-				"transaction_type": "Expense",
-				"amount_original": combined_amount,
-				"currency_original": combined_currency,
-				"fx_rate": fx_rate,
-				"fx_rate_date": fx_rate_date,
-				"amount_birr": round(combined_amount * fx_rate, 2),
-				"awaiting_fx_rate": 1 if awaiting_fx else 0,
-				"description": description,
-				"stage_logged_at": "Ticketing",
-				"logged_by": frappe.session.user,
-				# System-computed from known/fixed values, not a discretionary staff entry --
-				# auto-Approved, skips the Finance review step (same precedent as
-				# finance_engine.accrue_commission's Commission transaction).
-				"status": "Approved",
-			}
-		).insert(ignore_permissions=True)
-		placement.db_set("corridor_fees_logged", 1, update_modified=False)
-		result["corridor_fees_logged"] = 1
-		if awaiting_fx:
-			result["warning"] = (
-				f"Ticket cost recorded in {combined_currency}, awaiting an FX rate -- it converts to "
-				f"Birr automatically once Finance records a {combined_currency} rate."
-			)
-	except Exception:
-		frappe.db.rollback(save_point=save_point)
-		frappe.log_error(
-			title="Ticketing cost logging failed",
-			message=f"{placement_name}: {frappe.get_traceback()}",
-		)
-		result["warning"] = (
-			"Ticket saved, but the ticket cost couldn't be logged (see Error Log) -- calling "
-			"record_ticket_details again will retry it."
-		)
+	if flt(previous_cost) == ticket_amount:
+		return result
+	txn_name = frappe.db.get_value(
+		"Applicant Transaction", {"placement": placement_name, "fee_type": TICKET_FEE_TYPE}, "name", order_by="creation asc"
+	)
+	if txn_name:
+		warning = _correct_ticket_expense(txn_name, ticket_amount)
+	else:
+		# Logged before 2026-09-23 as the combined ticket + corridor-fees row -- no clean ticket
+		# amount to edit.
+		warning = "This ticket's cost was logged in the old combined entry, so it wasn't changed -- ask Finance to adjust it."
+	if warning:
+		result["warning"] = warning
 	return result
 
 
 @frappe.whitelist()
-def record_reschedule(placement_name=None, reschedule_date=None, reschedule_cause=None, reschedule_cost=None, currency=None, **kwargs):
-	"""Ticketer role. reschedule_cost is only meaningful/loggable when cause is Internal --
-	an airline/airport-caused reschedule isn't billed to us."""
+def record_reschedule(
+	placement_name=None,
+	reschedule_date=None,
+	reschedule_cause=None,
+	reschedule_cost=None,
+	currency=None,
+	ticket_number=None,
+	transaction=None,
+	**kwargs,
+):
+	"""Ticketer role. reschedule_date is the new flight date (flight_date moves with it).
+
+	- Airport: the airline moved the flight; no new ticket is paid, nothing is recorded.
+	- Internal: we rescheduled, so we buy a new ticket -- reschedule_cost (ETB, required) is
+	  recorded as its OWN auto-Approved expense (fee_type "Ticket (Internal Reschedule)"), one per
+	  reschedule. ticket_number, if given, replaces the placement's ticket number.
+	- Correcting an Internal reschedule's price: pass transaction=<that expense's name> with the
+	  corrected reschedule_cost -- the same row is edited, nothing new is recorded.
+	The recorded expense's name is returned as reschedule_transaction."""
 	if not placement_name:
 		frappe.throw("placement_name is required.", frappe.ValidationError)
-	if not reschedule_date:
-		frappe.throw("reschedule_date is required.", frappe.ValidationError)
-	if reschedule_cause not in ("Internal", "Airport"):
-		frappe.throw("reschedule_cause must be 'Internal' or 'Airport'.", frappe.ValidationError)
+	_require_etb(currency, "Reschedule cost")
 	placement = frappe.get_doc("Placement", placement_name)
 	if not placement.has_permission("write"):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	assert_placement_not_terminal(placement)
 
+	from frappe.utils import flt
+
+	if transaction:
+		if frappe.db.get_value("Applicant Transaction", transaction, ["placement", "fee_type"]) != (
+			placement_name,
+			RESCHEDULE_TICKET_FEE_TYPE,
+		):
+			frappe.throw(f"{transaction} isn't an internal-reschedule ticket cost of {placement_name}.", frappe.ValidationError)
+		warning = _correct_ticket_expense(transaction, reschedule_cost)
+		latest = frappe.db.get_value(
+			"Applicant Transaction",
+			{"placement": placement_name, "fee_type": RESCHEDULE_TICKET_FEE_TYPE},
+			"name",
+			order_by="creation desc",
+		)
+		if not warning and latest == transaction:
+			placement.db_set("reschedule_cost", reschedule_cost)
+		result = frappe.get_doc("Placement", placement_name).as_dict()
+		result["reschedule_transaction"] = transaction
+		if warning:
+			result["warning"] = warning
+		return result
+
+	if not reschedule_date:
+		frappe.throw("reschedule_date is required.", frappe.ValidationError)
+	if reschedule_cause not in ("Internal", "Airport"):
+		frappe.throw("reschedule_cause must be 'Internal' or 'Airport'.", frappe.ValidationError)
+	if reschedule_cause == "Internal" and flt(reschedule_cost) <= 0:
+		frappe.throw("reschedule_cost is required for an Internal reschedule -- we pay for the new ticket.", frappe.ValidationError)
+
 	placement.is_rescheduled = 1
 	placement.reschedule_date = reschedule_date
+	placement.flight_date = reschedule_date
 	placement.reschedule_cause = reschedule_cause
 	placement.reschedule_cost = reschedule_cost if reschedule_cause == "Internal" else None
+	if reschedule_cause == "Internal" and ticket_number:
+		placement.ticket_number = ticket_number
 	placement.save(ignore_permissions=True)
 
-	if reschedule_cause == "Internal" and reschedule_cost:
-		from agency_tracking.finance_api import _log_stage_transaction
-
-		_log_stage_transaction(
-			"Expense",
-			reschedule_cost,
-			currency or "ETB",
-			f"Internal reschedule cost for {placement_name}",
-			placement_name,
-			None,
+	result = placement.as_dict()
+	if reschedule_cause == "Internal":
+		result["reschedule_transaction"] = _record_ticket_expense(
+			placement,
+			flt(reschedule_cost),
+			RESCHEDULE_TICKET_FEE_TYPE,
+			f"New ticket after internal reschedule to {reschedule_date} ({flt(reschedule_cost)} ETB) for {placement_name}",
 		)
-	return placement.as_dict()
+	return result
 
 
 #: Applicant fields joined onto every list_placements row (2026-09-19) -- fixed set of

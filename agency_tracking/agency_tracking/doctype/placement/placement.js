@@ -207,7 +207,7 @@ UNFIT',
 				{
 					fieldname: 'ticket_cost',
 					fieldtype: 'Currency',
-					label: __('Ticket Cost'),
+					label: __('Ticket Cost (ETB)'),
 				},
 			],
 			primary_action_label: __('Record & Advance to Ticketed'),

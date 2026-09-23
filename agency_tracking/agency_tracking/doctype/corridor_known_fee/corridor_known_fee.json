@@ -31,7 +31,7 @@
   },
   {
    "default": "0",
-   "description": "Set to 0 for a fee this corridor doesn't charge -- every row still gets summed, a 0 row just contributes nothing.",
+   "description": "Recorded as its own auto-Approved Expense when the step above completes. Set to 0 for a fee this corridor doesn't charge -- a 0 row records nothing.",
    "fieldname": "amount",
    "fieldtype": "Currency",
    "in_list_view": 1,

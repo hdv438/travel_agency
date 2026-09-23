@@ -182,6 +182,21 @@ def get_complaint_aging_report():
 	}
 
 
+def _awaiting_fx_summary(filters):
+	"""Approved transactions still awaiting an FX rate (finance_engine.convert_awaiting_fx) count
+	as 0 in every *_birr total until a rate is recorded -- surfaced so the totals aren't silently
+	short: {"count": n, "by_currency": {"SAR": 300.0, ...}} (original-currency amounts)."""
+	by_currency = {}
+	rows = frappe.get_all(
+		"Applicant Transaction",
+		filters={**filters, "awaiting_fx_rate": 1},
+		fields=["currency_original", "amount_original"],
+	)
+	for row in rows:
+		by_currency[row.currency_original] = by_currency.get(row.currency_original, 0) + (row.amount_original or 0)
+	return {"count": len(rows), "by_currency": by_currency}
+
+
 @frappe.whitelist()
 def get_financial_overview(from_date=None, to_date=None, **kwargs):
 	"""Part F: "report_api.py gains get_financial_overview (Admin-only)" — deliberately not
@@ -217,6 +232,7 @@ def get_financial_overview(from_date=None, to_date=None, **kwargs):
 		"totals_birr": totals,
 		"outstanding_owed_birr": sum(r.amount_birr or 0 for r in owed_rows),
 		"settled_in_period_birr": sum(r.total_amount_birr or 0 for r in settled_batches),
+		"awaiting_fx": _awaiting_fx_summary(base_filters),
 	}
 
 
@@ -261,7 +277,12 @@ def get_cost_breakdown_report(from_date=None, to_date=None, **kwargs):
 		by_country.setdefault(country, 0)
 		by_country[country] += row.amount_birr or 0
 
-	return {"from_date": from_date, "to_date": to_date, "by_country_birr": by_country}
+	return {
+		"from_date": from_date,
+		"to_date": to_date,
+		"by_country_birr": by_country,
+		"awaiting_fx": _awaiting_fx_summary(base_filters),
+	}
 
 
 @frappe.whitelist()

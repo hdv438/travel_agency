@@ -124,17 +124,20 @@
    "label": "Reference No"
   },
   {
-   "description": "The step's own base fee (e.g. Taeshir's appointment booking fee) — Injaz/Wakala/Police Ashara below are separate payments on top of this.",
+   "description": "The step's own base fee (e.g. Taeshir's appointment booking fee) — Injaz/Wakala/Police Ashara below are separate payments on top of this. Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes).",
    "fieldname": "amount",
    "fieldtype": "Currency",
-   "label": "Amount"
+   "label": "Amount",
+   "hidden": 1
   },
   {
    "default": "Not Applicable",
    "fieldname": "payment_status",
    "fieldtype": "Select",
    "label": "Payment Status",
-   "options": "Not Applicable\nPending\nPaid"
+   "options": "Not Applicable\nPending\nPaid",
+   "hidden": 1,
+   "description": "Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes)."
   },
   {
    "collapsible": 1,
@@ -169,10 +172,11 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Paid by the foreign agency (Contractor), not internal staff — must be Paid before the Monday document submission or the Embassy step is blocked. Reminded Fri/Sat/Sun (watchdogs.wakala_reminder_watchdog).",
+   "description": "Paid by the foreign agency (Contractor), not internal staff — must be Paid before the Monday document submission or the Embassy step is blocked. Reminded Fri/Sat/Sun (watchdogs.wakala_reminder_watchdog). Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes).",
    "fieldname": "wakala_amount",
    "fieldtype": "Currency",
-   "label": "Wakala Amount"
+   "label": "Wakala Amount",
+   "hidden": 1
   },
   {
    "default": "Pending",
@@ -184,7 +188,9 @@
   {
    "fieldname": "wakala_paid_date",
    "fieldtype": "Date",
-   "label": "Wakala Paid Date"
+   "label": "Wakala Paid Date",
+   "hidden": 1,
+   "description": "Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes)."
   },
   {
    "description": "Musaned electronic power-of-attorney authorization number -- a distinct real-world number from this step's own Visa/Stamp reference_no (2026-09-11: previously the frontend and record_wakala_payment both wrote this into reference_no, silently overwriting the visa/stamp reference).",
@@ -224,14 +230,18 @@
   {
    "fieldname": "police_ashara_amount",
    "fieldtype": "Currency",
-   "label": "Amount"
+   "label": "Amount",
+   "hidden": 1,
+   "description": "Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes)."
   },
   {
    "default": "Not Applicable",
    "fieldname": "police_ashara_payment_status",
    "fieldtype": "Select",
    "label": "Payment Status",
-   "options": "Not Applicable\nPending\nPaid"
+   "options": "Not Applicable\nPending\nPaid",
+   "hidden": 1,
+   "description": "Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes)."
   },
   {
    "collapsible": 1,
@@ -249,7 +259,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-05 12:00:00.000000",
+ "modified": "2026-09-23 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agency Tracking",
  "name": "Clearance Step",

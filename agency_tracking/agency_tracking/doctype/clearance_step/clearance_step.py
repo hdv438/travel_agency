@@ -57,7 +57,28 @@ class ClearanceStep(Document):
 				"A rejection remark is required when an Embassy step is Rejected.",
 				frappe.ValidationError,
 			)
+		self._require_paid_injaz_to_complete_taeshir()
 		self._set_title()
+
+	def _require_paid_injaz_to_complete_taeshir(self):
+		"""2026-09-23: Taeshir can't be completed until the Injaz attempt it completes on is Paid
+		(record_injaz_payment). Checked only on the move INTO a done status, so correction re-saves
+		of an already-done step aren't blocked. Here rather than in complete_clearance_step so the
+		Desk form and every other completion path are covered too."""
+		from agency_tracking.stage_fees import final_injaz_attempt
+		from agency_tracking.state_machine import CLEARANCE_STEP_DONE_STATUSES
+
+		if self.step_type != "Taeshir" or self.status not in CLEARANCE_STEP_DONE_STATUSES:
+			return
+		before = self.get_doc_before_save()
+		if before and before.status in CLEARANCE_STEP_DONE_STATUSES:
+			return
+		attempt = final_injaz_attempt(self)
+		if not attempt or attempt.payment_status != "Paid":
+			frappe.throw(
+				"Taeshir can't be completed until the Injaz payment is marked Paid (record_injaz_payment).",
+				frappe.ValidationError,
+			)
 
 	def _set_title(self):
 		"""'{Step Type} — {Applicant} [{step ID}]', e.g. 'Embassy — Fatuma Muhammed Abi

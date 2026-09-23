@@ -51,7 +51,7 @@ def _fee_rows(destination_country, step_type, fee_type=None):
 	]
 
 
-def _final_injaz_attempt(step):
+def final_injaz_attempt(step):
 	"""The attempt the step was completed on: the last one not closed as Forfeited/Missed."""
 	open_attempts = [a for a in (step.get("injaz_attempts") or []) if a.outcome not in CLOSED_INJAZ_OUTCOMES]
 	return open_attempts[-1] if open_attempts else None
@@ -77,7 +77,9 @@ def _record_fee(step, placement, row, injaz_attempt=None):
 
 	from agency_tracking.finance_engine import get_fx_rate_or_none
 
-	save_point = f"sp_{frappe.generate_hash(length=10)}"  # "sp_" prefix: see record_ticket_details
+	# "sp_" prefix: a bare hex hash like "234e0744ce" parses as a number and MariaDB rejects it as a
+	# SAVEPOINT name (found live 2026-09-19).
+	save_point = f"sp_{frappe.generate_hash(length=10)}"
 	try:
 		frappe.db.savepoint(save_point)
 		fx_rate, fx_rate_date = get_fx_rate_or_none(row.currency)
@@ -126,7 +128,7 @@ def post_step_fees(step):
 		return []
 	posted = []
 	for row in _fee_rows(placement.destination_country, step.step_type):
-		attempt = _final_injaz_attempt(step) if row.fee_type == INJAZ_FEE_TYPE else None
+		attempt = final_injaz_attempt(step) if row.fee_type == INJAZ_FEE_TYPE else None
 		name = _record_fee(step, placement, row, injaz_attempt=attempt)
 		if name:
 			posted.append(name)

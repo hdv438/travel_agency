@@ -84,7 +84,7 @@
     },
     {
       "name": "Reports",
-      "description": "Management/Admin visibility \u2014 daily/staff/financial/aging/operations reports"
+      "description": "Management/Admin visibility — daily/staff/financial/aging/operations reports"
     },
     {
       "name": "Clearance Steps",
@@ -4654,7 +4654,7 @@
           "Placement"
         ],
         "summary": "Record a ticket reschedule",
-        "description": "reschedule_cost only meaningful/loggable when cause=Internal -- an airline/airport-caused reschedule isn't billed to the agency. Blocked (417) once the Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-1).",
+        "description": "reschedule_date is the new flight date (flight_date moves with it). Airport: the airline moved the flight -- nothing is paid or recorded. Internal: we rescheduled, so a new ticket is bought -- reschedule_cost (ETB) is REQUIRED and recorded as its OWN auto-Approved expense (fee_type 'Ticket (Internal Reschedule)'), one per reschedule; its name is returned as reschedule_transaction. ticket_number, if sent, replaces the placement's ticket number. To correct an Internal reschedule's price, call again with transaction=<that reschedule_transaction> and the corrected reschedule_cost (reschedule_date/cause not needed) -- the same row is edited. Blocked (417) once the Placement is already Departed/Cancelled.",
         "x-roles": [
           "Ticketer",
           "Write access to the Placement"
@@ -4674,30 +4674,51 @@
             "name": "reschedule_date",
             "in": "formData",
             "type": "string",
-            "required": true
+            "required": false,
+            "description": "New flight date. Required unless correcting via transaction."
           },
           {
             "name": "reschedule_cause",
             "in": "formData",
             "type": "string",
-            "required": true,
+            "required": false,
             "enum": [
               "Internal",
               "Airport"
-            ]
+            ],
+            "description": "Required unless correcting via transaction."
           },
           {
             "name": "reschedule_cost",
             "in": "formData",
             "type": "number",
-            "required": false
+            "required": false,
+            "description": "ETB. Required when cause=Internal (and when correcting). Ignored for Airport."
           },
           {
             "name": "currency",
             "in": "formData",
             "type": "string",
             "required": false,
-            "default": "ETB"
+            "default": "ETB",
+            "description": "Optional; must be ETB if sent.",
+            "enum": [
+              "ETB"
+            ]
+          },
+          {
+            "name": "ticket_number",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Internal only: the new ticket's number."
+          },
+          {
+            "name": "transaction",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Correct this Internal-reschedule expense's amount instead of recording a new reschedule."
           }
         ],
         "responses": {
@@ -4707,7 +4728,12 @@
               "type": "object",
               "properties": {
                 "message": {
-                  "$ref": "#/definitions/PlacementDoc"
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/PlacementDoc"
+                    }
+                  ],
+                  "description": "Plus reschedule_transaction (Internal) and possibly a 'warning' string (correction couldn't be applied)."
                 }
               }
             }
@@ -4865,8 +4891,8 @@
         "tags": [
           "Placement"
         ],
-        "summary": "Record ticket number/flight date, auto-logs corridor fees + cost as one expense",
-        "description": "ticket_cost is logged as ONE already-Approved Applicant Transaction expense (no Finance review needed) the FIRST time this is called for a placement -- see Placement.corridor_fees_logged, which prevents a later correction call (e.g. fixing the ticket number) from re-logging it. 2026-09-23: corridor known fees are no longer added in here -- each is recorded on its own, already-Approved, when its clearance step completes (fee_type/clearance_step set on the transaction); ticketing does not re-check or add them. Blocked (417) once the Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-1). Awaiting FX (2026-09-23): if the currency has never had an FX rate, the amount is still recorded in its own currency with awaiting_fx_rate=1 and amount_birr 0, and converted automatically when a rate for that currency is recorded. The response carries a warning saying so.",
+        "summary": "Record ticket number/flight date/cost (ETB); the cost is one auto-Approved expense",
+        "description": "ticket_cost is always ETB (any other currency -> 417, nothing saved). The first non-zero ticket_cost is recorded as ONE already-Approved Applicant Transaction expense (fee_type 'Ticket'). Calling again with a different ticket_cost corrects that SAME row's amount (a price correction, never a second row); changing only ticket_number/flight_date touches no money. If that row was Voided/Rejected by Finance, or the cost was logged in the pre-2026-09-23 combined entry, it isn't changed and the response carries a 'warning'. A new ticket bought because WE rescheduled is record_reschedule(cause=Internal), not this. Corridor known fees are recorded per clearance step when it completes, never here. Blocked (417) once the Placement is already Departed/Cancelled.",
         "x-roles": [
           "Ticketer",
           "Write access to the Placement"
@@ -4898,14 +4924,18 @@
             "name": "ticket_cost",
             "in": "formData",
             "type": "number",
-            "required": false
+            "required": false,
+            "description": "ETB. A different value on a later call corrects the recorded expense."
           },
           {
             "name": "currency",
             "in": "formData",
             "type": "string",
-            "description": "Currency of ticket_cost. Defaults to ETB.",
-            "required": false
+            "description": "Optional; must be ETB if sent (ticket cost is always Birr).",
+            "required": false,
+            "enum": [
+              "ETB"
+            ]
           }
         ],
         "responses": {
@@ -4920,7 +4950,7 @@
                       "$ref": "#/definitions/PlacementDoc"
                     }
                   ],
-                  "description": "May include an extra 'warning' string property if cost-logging failed (see 04-finance-contract.md)."
+                  "description": "May include a 'warning' string when a changed ticket_cost couldn't be applied to the ledger row."
                 }
               }
             }
@@ -5700,6 +5730,22 @@
                     "by_country_birr": {
                       "type": "object",
                       "description": "Keyed by destination_country, value in Birr."
+                    },
+                    "awaiting_fx": {
+                      "type": "object",
+                      "description": "Approved rows still awaiting an FX rate -- they count as 0 in the *_birr totals until converted.",
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        },
+                        "by_currency": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          },
+                          "description": "Original-currency amounts, e.g. {\"SAR\": 300}"
+                        }
+                      }
                     }
                   }
                 }
@@ -5725,7 +5771,7 @@
         "tags": [
           "Reports"
         ],
-        "summary": "CVs created, medicals processed, clearances issued, embassies cleared, tickets booked, departures \u2014 for a date range",
+        "summary": "CVs created, medicals processed, clearances issued, embassies cleared, tickets booked, departures — for a date range",
         "description": "business-workflow-srs.md Part 8's exact list.",
         "x-roles": [
           "Manager",
@@ -5936,6 +5982,22 @@
                     },
                     "settled_in_period_birr": {
                       "type": "number"
+                    },
+                    "awaiting_fx": {
+                      "type": "object",
+                      "description": "Approved rows still awaiting an FX rate -- they count as 0 in the *_birr totals until converted.",
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        },
+                        "by_currency": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          },
+                          "description": "Original-currency amounts, e.g. {\"SAR\": 300}"
+                        }
+                      }
                     }
                   }
                 }

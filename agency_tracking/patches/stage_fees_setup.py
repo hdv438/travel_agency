@@ -11,16 +11,22 @@
 #   (c) catch-up: every placement not yet ticketed gets fees for steps it already completed --
 #       otherwise those would be recorded by neither the old system (never reached ticketing
 #       under it) nor the new one (completed before it existed).
+#   (a') a fee type that maps to a step this corridor doesn't have (Wakala: "Embassy" on Saudi,
+#       "Kuwait Embassy" on Kuwait -- the first one that exists wins) -- the pre-09-23 corridors
+#       carried every fee type, 0 for the ones that don't apply. Such a zero row is deleted (it
+#       records nothing, and would otherwise make the corridor fail validation on its next save);
+#       a NON-zero one is left without a step and logged to Error Log for someone to fix.
 # Idempotent: re-running adds nothing.
 
 import frappe
+from frappe.utils import flt
 
 STEP_TYPE_BY_FEE_TYPE = {
 	"LMIS Fee": "LMIS Clearance",
 	"Insurance Fee": "LMIS Clearance",
 	"Taeshir Appointment Fee": "Taeshir",
 	"Injaz Payment": "Taeshir",
-	"Wakala Payment": "Embassy",
+	"Wakala Payment": ("Embassy", "Kuwait Embassy"),
 	"Kuwait LMIS Fee": "Kuwait LMIS",
 	# Police Ashara is tracked on the Kuwait LMIS step (clearance_step.json police_ashara_sec).
 	"Police Ashara Fee": "Kuwait LMIS",
@@ -28,12 +34,30 @@ STEP_TYPE_BY_FEE_TYPE = {
 
 
 def execute():
-	for fee_type, step_type in STEP_TYPE_BY_FEE_TYPE.items():
-		frappe.db.sql(
-			"""UPDATE `tabCorridor Known Fee` SET step_type = %s
-			WHERE fee_type = %s AND COALESCE(step_type, '') = ''""",
-			(step_type, fee_type),
+	for corridor in frappe.get_all("Corridor Definition", pluck="name"):
+		corridor_steps = set(
+			frappe.get_all("Corridor Step", filters={"parent": corridor, "parenttype": "Corridor Definition"}, pluck="step_type")
 		)
+		for row in frappe.get_all(
+			"Corridor Known Fee",
+			filters={"parent": corridor, "parenttype": "Corridor Definition"},
+			fields=["name", "fee_type", "step_type", "amount"],
+		):
+			if row.step_type in corridor_steps:
+				continue
+			candidates = STEP_TYPE_BY_FEE_TYPE.get(row.fee_type) or ()
+			if isinstance(candidates, str):
+				candidates = (candidates,)
+			step_type = next((st for st in candidates if st in corridor_steps), None)
+			if step_type:
+				frappe.db.set_value("Corridor Known Fee", row.name, "step_type", step_type, update_modified=False)
+			elif not flt(row.amount):
+				frappe.db.delete("Corridor Known Fee", {"name": row.name})
+			else:
+				frappe.log_error(
+					title="stage_fees_setup: fee has no step on its corridor",
+					message=f"{corridor}: {row.fee_type} ({row.amount}) maps to none of {sorted(corridor_steps)} -- set its step by hand.",
+				)
 
 	frappe.db.sql(
 		"""UPDATE `tabPlacement` SET legacy_lump_fees = 1

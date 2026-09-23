@@ -43,17 +43,20 @@
    "label": "Injaz Application ID"
   },
   {
-   "description": "The Injaz website payment for this attempt (separate from the appointment fee).",
+   "description": "The Injaz website payment for this attempt (separate from the appointment fee). Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes).",
    "fieldname": "injaz_amount",
    "fieldtype": "Currency",
-   "label": "Injaz Amount"
+   "label": "Injaz Amount",
+   "hidden": 1
   },
   {
    "default": "SAR",
    "fieldname": "injaz_currency",
    "fieldtype": "Select",
    "label": "Injaz Currency",
-   "options": "SAR\nKWD\nUSD\nETB\nAED\nQAR"
+   "options": "SAR\nKWD\nUSD\nETB\nAED\nQAR",
+   "hidden": 1,
+   "description": "Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes)."
   },
   {
    "default": "Unpaid",
@@ -71,12 +74,16 @@
   {
    "fieldname": "receipt_number",
    "fieldtype": "Data",
-   "label": "Receipt Number"
+   "label": "Receipt Number",
+   "hidden": 1,
+   "description": "Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes)."
   },
   {
    "fieldname": "receipt_photo",
    "fieldtype": "Attach Image",
-   "label": "Receipt Photo"
+   "label": "Receipt Photo",
+   "hidden": 1,
+   "description": "Hidden 2026-09-23: not used -- corridor fees come from Corridor Definition.known_fees (recorded when the step completes)."
   },
   {
    "fieldname": "remark",
@@ -87,7 +94,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-05 00:00:00.000000",
+ "modified": "2026-09-23 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agency Tracking",
  "name": "Injaz Attempt",
