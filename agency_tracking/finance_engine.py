@@ -307,14 +307,14 @@ def list_owed_commissions_by_currency(contractor_name, destination_country):
 
 def _unpaid_item_names_from_open_batches(contractor_name, currency):
 	"""Every still-Pending Commission Batch Item sitting in one of this contractor's other open
-	batches (status Sent / Partially Settled) in the same currency -- the exact same pool the
+	batches (anything not Settled -- Draft/Sent aren't used any more, 2026-09-23) in the same currency -- the exact same pool the
 	invoice PDF's own print-only "previous unpaid" line already sums for display (see
 	render_batch_invoice_pdf). Used by create_batch_request's include_unpaid_from_previous flag
 	(2026-09-12) to actually fold that amount into a NEW batch as real, trackable items, instead
 	of just a cosmetic number on the printed invoice."""
 	open_batch_names = frappe.get_all(
 		"Commission Batch Request",
-		filters={"contractor": contractor_name, "currency": currency, "status": ["in", ["Sent", "Partially Settled"]]},
+		filters={"contractor": contractor_name, "currency": currency, "status": ["!=", "Settled"]},
 		pluck="name",
 	)
 	if not open_batch_names:
@@ -401,7 +401,7 @@ def create_batch_request(
 	list_owed_commissions_by_currency), since a batch/invoice is always single-currency.
 
 	include_unpaid_from_previous (2026-09-12, "include unpaid from previous" action): also folds
-	in any still-Pending items sitting in this contractor's other open batches (Sent/Partially
+	in any still-Pending items sitting in this contractor's other open batches (anything not
 	Settled) in the same currency -- the exact pool the invoice PDF's own print-only "previous
 	unpaid" line already sums for display, but actually made part of THIS batch's real, per-item-
 	trackable total instead of just a cosmetic number on the printout. Releases those items from
@@ -760,7 +760,11 @@ def render_batch_invoice_pdf(batch_name):
 					"contractor": batch.contractor,
 					"currency": batch.currency,
 					"name": ["!=", batch.name],
-					"status": ["in", ["Sent", "Partially Settled"]],
+					# Only invoices issued BEFORE this one (2026-09-23) -- now that every unsettled
+					# batch counts as open (Draft included), re-printing an older invoice would
+					# otherwise also pull in newer invoices' balances as "previous".
+					"creation": ["<", batch.creation],
+					"status": ["!=", "Settled"],
 				},
 				fields=["sum(balance_due_original) as total"],
 			)

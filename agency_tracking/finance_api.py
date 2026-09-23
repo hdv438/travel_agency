@@ -335,7 +335,7 @@ def create_commission_batch(
 	the batch's currency.
 
 	include_unpaid_from_previous (2026-09-12, "include unpaid from previous" button): when true,
-	also folds in any still-unpaid items from this contractor's other open batches (Sent/Partially
+	also folds in any still-unpaid items from this contractor's other open batches (anything not
 	Settled) in the same currency, so this new batch's own total genuinely includes them --
 	trackable per item afterward via settle_batch_items, same as any other item. Requires currency
 	to be known (pass it explicitly, or it's derived from transaction_names when given).
