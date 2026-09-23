@@ -335,7 +335,7 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 
 	from frappe.utils import flt
 
-	from agency_tracking.finance_engine import get_fx_rate
+	from agency_tracking.finance_engine import get_fx_rate_or_none
 
 	placement.ticket_number = ticket_number
 	placement.flight_date = flight_date
@@ -365,8 +365,12 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 	save_point = f"sp_{frappe.generate_hash(length=10)}"
 	try:
 		frappe.db.savepoint(save_point)
-		fx_rate, fx_rate_date = get_fx_rate(combined_currency)
-		fx_rate = Decimal(str(fx_rate))
+		# No FX rate ever recorded for this currency: record it anyway, in its own currency,
+		# awaiting conversion (finance_engine.convert_awaiting_fx, 2026-09-23) -- previously the
+		# ticket cost was dropped with a "set a rate, then call again" warning.
+		fx_rate, fx_rate_date = get_fx_rate_or_none(combined_currency)
+		awaiting_fx = fx_rate is None
+		fx_rate = Decimal("0") if awaiting_fx else Decimal(str(fx_rate))
 		description = f"Ticket cost ({ticket_amount}) for {placement_name}"
 		frappe.get_doc(
 			{
@@ -378,6 +382,7 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 				"fx_rate": fx_rate,
 				"fx_rate_date": fx_rate_date,
 				"amount_birr": round(combined_amount * fx_rate, 2),
+				"awaiting_fx_rate": 1 if awaiting_fx else 0,
 				"description": description,
 				"stage_logged_at": "Ticketing",
 				"logged_by": frappe.session.user,
@@ -389,6 +394,11 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 		).insert(ignore_permissions=True)
 		placement.db_set("corridor_fees_logged", 1, update_modified=False)
 		result["corridor_fees_logged"] = 1
+		if awaiting_fx:
+			result["warning"] = (
+				f"Ticket cost recorded in {combined_currency}, awaiting an FX rate -- it converts to "
+				f"Birr automatically once Finance records a {combined_currency} rate."
+			)
 	except Exception:
 		frappe.db.rollback(save_point=save_point)
 		frappe.log_error(
@@ -396,9 +406,8 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 			message=f"{placement_name}: {frappe.get_traceback()}",
 		)
 		result["warning"] = (
-			f"Ticket saved, but the ticket cost wasn't logged — ask Finance to set an FX rate "
-			f"for {combined_currency} (finance_api.set_fx_rate), then retry by calling "
-			f"record_ticket_details again (it will still be unlogged, so it will retry)."
+			"Ticket saved, but the ticket cost couldn't be logged (see Error Log) -- calling "
+			"record_ticket_details again will retry it."
 		)
 	return result
 

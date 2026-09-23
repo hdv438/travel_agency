@@ -21,6 +21,7 @@
   "fx_rate",
   "fx_rate_date",
   "amount_birr",
+  "awaiting_fx_rate",
   "description",
   "clearance_step",
   "fee_type",
@@ -131,14 +132,14 @@
    "fieldtype": "Float",
    "label": "FX Rate (to Birr)",
    "read_only": 1,
-   "reqd": 1
+   "mandatory_depends_on": "eval:!doc.awaiting_fx_rate"
   },
   {
    "fieldname": "fx_rate_date",
    "fieldtype": "Date",
    "label": "FX Rate Date",
    "read_only": 1,
-   "reqd": 1
+   "mandatory_depends_on": "eval:!doc.awaiting_fx_rate"
   },
   {
    "fieldname": "amount_birr",
@@ -146,6 +147,15 @@
    "in_list_view": 1,
    "label": "Amount (Birr)",
    "read_only": 1
+  },
+  {
+   "fieldname": "awaiting_fx_rate",
+   "fieldtype": "Check",
+   "label": "Awaiting FX Rate",
+   "default": "0",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "description": "Recorded in its own currency while no FX rate for that currency existed yet -- amount_birr is 0 until a rate is recorded, then it's converted automatically (finance_engine.convert_awaiting_fx)."
   },
   {
    "fieldname": "description",
@@ -221,7 +231,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-23 12:00:00.000000",
+ "modified": "2026-09-23 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agency Tracking",
  "name": "Applicant Transaction",

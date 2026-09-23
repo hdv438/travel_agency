@@ -7,6 +7,15 @@ from frappe.model.document import Document
 
 class ApplicantTransaction(Document):
 	def validate(self):
+		# fx_rate/fx_rate_date are required unless the row is awaiting an FX rate (2026-09-23).
+		# Enforced here because mandatory_depends_on is only applied in the Desk form, not on the
+		# server -- the fields used to be plain reqd.
+		if not self.awaiting_fx_rate and (self.fx_rate is None or not self.fx_rate_date):
+			frappe.throw(
+				"FX Rate and FX Rate Date are required (unless the transaction is awaiting an FX rate).",
+				frappe.MandatoryError,
+			)
+
 		# Defense in depth: amount_birr must always be the product of the two figures that
 		# produced it, regardless of which code path created this row.
 		self.amount_birr = round((self.amount_original or 0) * (self.fx_rate or 0), 2)

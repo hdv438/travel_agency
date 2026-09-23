@@ -3513,7 +3513,7 @@
           "Finance"
         ],
         "summary": "Manually record an FX rate",
-        "description": "Custom-mode path (FX Rate Settings). ETB cannot be set -- it's always 1:1, hardcoded.",
+        "description": "Custom-mode path (FX Rate Settings). ETB cannot be set -- it's always 1:1, hardcoded. Recording a rate also converts every awaiting_fx_rate transaction in that currency (the transaction's own-date rate if one exists on/before it, else the earliest rate after it). Already-converted transactions are never recomputed.",
         "x-roles": [
           "Finance Manager",
           "Admin"
@@ -4866,7 +4866,7 @@
           "Placement"
         ],
         "summary": "Record ticket number/flight date, auto-logs corridor fees + cost as one expense",
-        "description": "ticket_cost is logged as ONE already-Approved Applicant Transaction expense (no Finance review needed) the FIRST time this is called for a placement -- see Placement.corridor_fees_logged, which prevents a later correction call (e.g. fixing the ticket number) from re-logging it. 2026-09-23: corridor known fees are no longer added in here -- each is recorded on its own, already-Approved, when its clearance step completes (fee_type/clearance_step set on the transaction); ticketing does not re-check or add them. Blocked (417) once the Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-1).",
+        "description": "ticket_cost is logged as ONE already-Approved Applicant Transaction expense (no Finance review needed) the FIRST time this is called for a placement -- see Placement.corridor_fees_logged, which prevents a later correction call (e.g. fixing the ticket number) from re-logging it. 2026-09-23: corridor known fees are no longer added in here -- each is recorded on its own, already-Approved, when its clearance step completes (fee_type/clearance_step set on the transaction); ticketing does not re-check or add them. Blocked (417) once the Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-1). Awaiting FX (2026-09-23): if the currency has never had an FX rate, the amount is still recorded in its own currency with awaiting_fx_rate=1 and amount_birr 0, and converted automatically when a rate for that currency is recorded. The response carries a warning saying so.",
         "x-roles": [
           "Ticketer",
           "Write access to the Placement"
@@ -8311,7 +8311,7 @@
           "Finance"
         ],
         "summary": "Applicant Transaction history across every status",
-        "description": "Applicant Transaction history across every status (Pending/Approved/Rejected/Voided) -- unlike get_pending_approval_queue (report_api.py), which only ever shows Pending. Surfaces who acted on each row: approved_by/approved_on for Approved, rejection_reason for Rejected, logged_by for who originally created it. from_date/to_date filter on creation date (inclusive). Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total.",
+        "description": "Applicant Transaction history across every status (Pending/Approved/Rejected/Voided) -- unlike get_pending_approval_queue (report_api.py), which only ever shows Pending. Surfaces who acted on each row: approved_by/approved_on for Approved, rejection_reason for Rejected, logged_by for who originally created it. from_date/to_date filter on creation date (inclusive). Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total. Rows include clearance_step, fee_type and awaiting_fx_rate (1 = amount_birr is 0 until an FX rate for currency_original is recorded).",
         "x-roles": [
           "Finance Manager",
           "Admin",

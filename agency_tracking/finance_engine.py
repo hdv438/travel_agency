@@ -59,11 +59,65 @@ def record_fx_rate(currency, rate_to_birr, rate_date=None):
 	existing = frappe.db.get_value("FX Rate", {"currency": currency, "rate_date": rate_date}, "name")
 	if existing:
 		frappe.db.set_value("FX Rate", existing, "rate_to_birr", rate_to_birr)
+		convert_awaiting_fx(currency)
 		return existing
+	# FXRate.on_update runs convert_awaiting_fx for a newly inserted rate.
 	doc = frappe.get_doc(
 		{"doctype": "FX Rate", "currency": currency, "rate_date": rate_date, "rate_to_birr": rate_to_birr}
 	).insert(ignore_permissions=True)
 	return doc.name
+
+
+# --- Recording before an FX rate exists (2026-09-23) ---
+# System-recorded amounts (stage fees, ticket cost) used to be dropped when their currency had no
+# FX rate at all. They're now recorded in their own currency with awaiting_fx_rate=1 (amount_birr
+# 0), and converted as soon as any rate for that currency is recorded -- by hand (set_fx_rate), by
+# the scheduled fetch, or in Desk (all go through record_fx_rate / FXRate.on_update).
+
+
+def get_fx_rate_or_none(currency, as_of_date=None):
+	"""Like get_fx_rate, but (None, None) instead of throwing when this currency has never had a
+	rate on or before as_of_date."""
+	try:
+		return get_fx_rate(currency, as_of_date)
+	except frappe.ValidationError:
+		frappe.clear_last_message()
+		return None, None
+
+
+def convert_awaiting_fx(currency):
+	"""Convert every awaiting_fx_rate Applicant Transaction in `currency`. Uses the rate for the
+	transaction's own date when one exists on or before it, otherwise the earliest rate after it
+	(the first rate that ever became available). Idempotent; returns the converted names."""
+	converted = []
+	for txn in frappe.get_all(
+		"Applicant Transaction",
+		filters={"awaiting_fx_rate": 1, "currency_original": currency},
+		fields=["name", "amount_original", "creation"],
+	):
+		txn_date = frappe.utils.getdate(txn.creation)
+		rate, rate_date = get_fx_rate_or_none(currency, txn_date)
+		if rate is None:
+			later = frappe.db.get_value(
+				"FX Rate", {"currency": currency, "rate_date": [">", txn_date]},
+				["rate_to_birr", "rate_date"], order_by="rate_date asc",
+			)
+			if not later:
+				continue
+			rate, rate_date = later
+		rate = Decimal(str(rate))
+		frappe.db.set_value(
+			"Applicant Transaction",
+			txn.name,
+			{
+				"fx_rate": rate,
+				"fx_rate_date": rate_date,
+				"amount_birr": round(Decimal(str(txn.amount_original)) * rate, 2),
+				"awaiting_fx_rate": 0,
+			},
+		)
+		converted.append(txn.name)
+	return converted
 
 
 # Currencies the app converts to Birr, and the public rate source. We use ExchangeRate-API's

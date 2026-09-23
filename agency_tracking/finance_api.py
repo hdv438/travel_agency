@@ -224,7 +224,7 @@ def list_transactions(
 			"name", "applicant", "placement", "transaction_type", "stage_logged_at", "status",
 			"amount_original", "currency_original", "amount_birr", "description",
 			"logged_by", "approved_by", "approved_on", "rejection_reason",
-			"commission_batch_request", "clearance_step", "fee_type", "creation",
+			"commission_batch_request", "clearance_step", "fee_type", "awaiting_fx_rate", "creation",
 		],
 		order_by=order_by,
 		limit_start=start,

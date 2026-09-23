@@ -60,9 +60,10 @@ def _final_injaz_attempt(step):
 def _record_fee(step, placement, row, injaz_attempt=None):
 	"""Insert one auto-Approved Expense for `row` unless this (step, fee, attempt) already has
 	one -- in any status, so a row Finance deliberately voided is never silently re-created.
-	Best-effort: a failure (only possible when the fee's currency has never had any FX rate --
-	get_fx_rate falls back to the latest known rate otherwise) is logged to the Error Log and
-	rolled back to a savepoint, never blocking the step itself. Not retried automatically."""
+	If the fee's currency has never had an FX rate, it's still recorded -- in its own currency,
+	awaiting_fx_rate=1, amount_birr 0 -- and converted when a rate is recorded
+	(finance_engine.convert_awaiting_fx). Any other failure is logged and rolled back to a
+	savepoint, never blocking the step itself."""
 	attempt_name = injaz_attempt.name if injaz_attempt else None
 	key = {
 		"clearance_step": step.name,
@@ -74,14 +75,15 @@ def _record_fee(step, placement, row, injaz_attempt=None):
 
 	from decimal import Decimal
 
-	from agency_tracking.finance_engine import get_fx_rate
+	from agency_tracking.finance_engine import get_fx_rate_or_none
 
 	save_point = f"sp_{frappe.generate_hash(length=10)}"  # "sp_" prefix: see record_ticket_details
 	try:
 		frappe.db.savepoint(save_point)
-		fx_rate, fx_rate_date = get_fx_rate(row.currency)
+		fx_rate, fx_rate_date = get_fx_rate_or_none(row.currency)
+		awaiting_fx = fx_rate is None
 		amount = Decimal(str(row.amount))
-		fx_rate = Decimal(str(fx_rate))
+		fx_rate = Decimal("0") if awaiting_fx else Decimal(str(fx_rate))
 		attempt_note = f", Injaz attempt {injaz_attempt.injaz_application_id or attempt_name}" if injaz_attempt else ""
 		txn = frappe.get_doc(
 			{
@@ -94,6 +96,7 @@ def _record_fee(step, placement, row, injaz_attempt=None):
 				"fx_rate": fx_rate,
 				"fx_rate_date": fx_rate_date,
 				"amount_birr": round(amount * fx_rate, 2),
+				"awaiting_fx_rate": 1 if awaiting_fx else 0,
 				"description": f"{row.fee_type} -- {step.step_type} [{step.name}]{attempt_note} for {placement.name}",
 				"stage_logged_at": step.step_type,
 				"clearance_step": step.name,
