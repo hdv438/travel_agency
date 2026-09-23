@@ -925,7 +925,7 @@
             "in": "formData",
             "type": "boolean",
             "required": false,
-            "description": "Manager/Admin only, to push past an active country ban on the applicant's destination_country"
+            "description": "Manager/Admin/System Manager only, to push past an active country ban on the applicant's destination_country"
           },
           {
             "name": "override_reason",
@@ -997,7 +997,7 @@
             "in": "formData",
             "type": "boolean",
             "required": false,
-            "description": "Manager/Admin only, to push past an active country ban on the applicant's destination_country"
+            "description": "Manager/Admin/System Manager only, to push past an active country ban on the applicant's destination_country"
           },
           {
             "name": "override_reason",
@@ -1061,7 +1061,7 @@
             "in": "formData",
             "type": "boolean",
             "required": false,
-            "description": "Manager/Admin only, to push past a country ban"
+            "description": "Manager/Admin/System Manager only, to push past a country ban"
           },
           {
             "name": "override_reason",
@@ -2880,7 +2880,7 @@
             "in": "formData",
             "type": "boolean",
             "required": false,
-            "description": "Manager/Admin only, to push past an active country ban on the applicant's destination_country"
+            "description": "Manager/Admin/System Manager only, to push past an active country ban on the applicant's destination_country"
           },
           {
             "name": "override_reason",

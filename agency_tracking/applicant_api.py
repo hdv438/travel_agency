@@ -40,7 +40,7 @@ def create_applicant(**data):
 def _check_country_ban_or_throw(applicant_name, country, override, override_reason, action=None):
 	"""'Ashara Teyezuwal' (2026-08-29): a permanent per-(Applicant, Country) blacklist. Only
 	active=1 rows block anything -- a lifted ban (remove_country_ban) is kept for history but no
-	longer enforced. Manager/Admin can force past an active ban with a written reason -- same
+	longer enforced. Manager/Admin/System Manager can force past an active ban with a written reason -- same
 	override shape as a blocked STAGE_GATES transition, even though this check sits outside the
 	state machine itself (it's a field-level guard, not a status move).
 
@@ -76,8 +76,11 @@ def _check_country_ban_or_throw(applicant_name, country, override, override_reas
 			frappe.PermissionError,
 		)
 
-	if not ({"Manager", "Admin"} & set(frappe.get_roles())):
-		frappe.throw("Only Manager or Admin can override a country ban.", frappe.PermissionError)
+	# Same role set that can lift a ban or decide a Country Ban Request (System Manager added
+	# 2026-09-23 -- it could already lift a ban outright, so refusing it a one-off override was
+	# an inconsistency, not a restriction).
+	if not _is_ban_decider():
+		frappe.throw("Only a Manager, Admin or System Manager can override a country ban.", frappe.PermissionError)
 	if not override_reason:
 		frappe.throw("A written reason is required to override a country ban.", frappe.ValidationError)
 
