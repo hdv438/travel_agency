@@ -22,6 +22,9 @@
   "fx_rate_date",
   "amount_birr",
   "description",
+  "clearance_step",
+  "fee_type",
+  "injaz_attempt",
   "receipt_image",
   "commission_batch_request",
   "approval_sec",
@@ -150,6 +153,29 @@
    "label": "Description/Remark"
   },
   {
+   "fieldname": "clearance_step",
+   "fieldtype": "Link",
+   "label": "Clearance Step",
+   "options": "Clearance Step",
+   "read_only": 1,
+   "description": "Set on stage fees recorded automatically when this step completed (2026-09-23)."
+  },
+  {
+   "fieldname": "fee_type",
+   "fieldtype": "Data",
+   "label": "Fee Type",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "injaz_attempt",
+   "fieldtype": "Data",
+   "label": "Injaz Attempt",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "Injaz Attempt row this Injaz fee was charged for (one fee per paid attempt)."
+  },
+  {
    "description": "Upload here -- automatically moved to Cloudflare R2 (agency/{applicant}/finance-receipts/) on save, this field then holds the R2 URL, not a local Frappe file.",
    "fieldname": "receipt_image",
    "fieldtype": "Attach",
@@ -195,7 +221,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-29 00:00:00.000000",
+ "modified": "2026-09-23 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agency Tracking",
  "name": "Applicant Transaction",

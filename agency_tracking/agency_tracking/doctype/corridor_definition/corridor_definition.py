@@ -3,14 +3,13 @@
 
 import frappe
 from frappe.model.document import Document
-from frappe.utils import flt
 
 
 class CorridorDefinition(Document):
 	def validate(self):
 		self.validate_unique_sequence_orders()
 		self.validate_unique_step_types()
-		self.validate_known_fees_single_currency()
+		self.validate_known_fee_steps()
 
 	def validate_unique_sequence_orders(self):
 		orders = [row.sequence_order for row in self.steps]
@@ -28,17 +27,16 @@ class CorridorDefinition(Document):
 				frappe.ValidationError,
 			)
 
-	def validate_known_fees_single_currency(self):
-		"""All known_fees rows get summed into ONE Applicant Transaction at ticketing time
-		(corridor_engine.get_corridor_known_fees_total / placement_api.record_ticket_details) --
-		that only makes sense if they're all the same currency. Zero-amount rows (a fee this
-		corridor doesn't charge) are exempt -- their currency value is a required-field
-		placeholder, not a real amount, so it shouldn't force every other row onto SAR/KWD/etc if
-		the agency just left it at whatever the field defaults to."""
-		currencies = {row.currency for row in (self.known_fees or []) if flt(row.amount)}
-		if len(currencies) > 1:
-			frappe.throw(
-				f"Corridor {self.destination_country}: known_fees with a non-zero amount must all "
-				f"share one currency (found {', '.join(sorted(currencies))}).",
-				frappe.ValidationError,
-			)
+	def validate_known_fee_steps(self):
+		"""Each known fee is recorded when its step_type completes (stage_fees.post_step_fees,
+		2026-09-23), so that step has to exist on this corridor. Fees are recorded one row each,
+		not summed, so rows may use different currencies (the old single-currency rule is gone)."""
+		corridor_steps = {row.step_type for row in self.steps}
+		for row in self.known_fees or []:
+			if row.step_type not in corridor_steps:
+				frappe.throw(
+					f"Corridor {self.destination_country}: fee '{row.fee_type}' is set to record on "
+					f"'{row.step_type}', which isn't one of this corridor's steps "
+					f"({', '.join(sorted(corridor_steps)) or 'none'}).",
+					frappe.ValidationError,
+				)

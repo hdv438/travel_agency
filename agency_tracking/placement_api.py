@@ -305,14 +305,15 @@ def advance_placement(placement_name=None, new_status=None, override_reason=None
 
 @frappe.whitelist()
 def record_ticket_details(placement_name=None, ticket_number=None, flight_date=None, ticket_cost=None, currency=None, **kwargs):
-	"""Ticketer role. ticket_cost, together with this corridor's known_fees (LMIS/Insurance/
-	Taeshir/Injaz/Wakala/Kuwait LMIS/Police Ashara -- Corridor Definition.known_fees, set to 0 for
-	whichever don't apply), auto-logs ONE already-Approved Applicant Transaction expense the first
-	time this is called for a placement (2026-09-19 product decision: those fees are known in
-	advance, so there's no need for a Clearance Officer to separately hand-log them stage by stage
-	via finance_api.log_stage_expense the way ad-hoc costs still are -- and no need for Finance to
-	separately approve a system-computed total). Re-saving ticket details later (e.g. correcting
-	the ticket number) does NOT re-log -- see Placement.corridor_fees_logged.
+	"""Ticketer role. ticket_cost auto-logs ONE already-Approved Applicant Transaction expense the
+	first time this is called for a placement (a known figure, no Finance approval needed).
+	Re-saving ticket details later (e.g. correcting the ticket number) does NOT re-log -- see
+	Placement.corridor_fees_logged, which now means "ticket cost logged".
+
+	2026-09-23 (client item #12): the corridor's known fees are no longer summed in here -- each
+	is recorded on its own when its clearance step completes (stage_fees.py). This call only runs
+	stage_fees.post_missing_stage_fees as a safety net, retrying any fee whose recording failed
+	earlier (e.g. an FX rate that was missing at the time).
 
 	2026-08-30 fix (backend-issues #05, still applies): ticket_number/flight_date are pure
 	logistics fields with no FX dependency -- the cost-logging sub-step runs inside its own DB
@@ -334,21 +335,10 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 
 	from frappe.utils import flt
 
-	from agency_tracking.corridor_engine import get_corridor_known_fees_total
 	from agency_tracking.finance_engine import get_fx_rate
+	from agency_tracking.stage_fees import post_missing_stage_fees
 
-	# Validated BEFORE anything is saved -- a bad currency param is a caller input error, not a
-	# transient system-dependency failure like a missing FX rate (that one's still soft/best-
-	# effort below), so it should reject the whole call cleanly with no partial side effects
-	# rather than leave ticket_number/flight_date persisted under a call that then errors out.
-	fee_total, fee_currency = get_corridor_known_fees_total(placement.destination_country)
-	if fee_currency and currency and currency != fee_currency:
-		frappe.throw(
-			f"ticket_cost currency ({currency}) must match this corridor's known_fees currency "
-			f"({fee_currency}) -- they're summed into one transaction. Pass currency={fee_currency}, "
-			f"or fix the mismatched Corridor Definition.known_fees rows first.",
-			frappe.ValidationError,
-		)
+	post_missing_stage_fees(placement.name)
 
 	placement.ticket_number = ticket_number
 	placement.flight_date = flight_date
@@ -360,8 +350,8 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 		return result
 
 	ticket_amount = flt(ticket_cost)
-	combined_currency = currency or fee_currency or "ETB"
-	combined_amount = Decimal(str(ticket_amount)) + Decimal(str(fee_total))
+	combined_currency = currency or "ETB"
+	combined_amount = Decimal(str(ticket_amount))
 	if not combined_amount:
 		return result
 
@@ -380,7 +370,7 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 		frappe.db.savepoint(save_point)
 		fx_rate, fx_rate_date = get_fx_rate(combined_currency)
 		fx_rate = Decimal(str(fx_rate))
-		description = f"Ticket cost ({ticket_amount}) + corridor known fees ({fee_total}) for {placement_name}"
+		description = f"Ticket cost ({ticket_amount}) for {placement_name}"
 		frappe.get_doc(
 			{
 				"doctype": "Applicant Transaction",
@@ -409,7 +399,7 @@ def record_ticket_details(placement_name=None, ticket_number=None, flight_date=N
 			message=f"{placement_name}: {frappe.get_traceback()}",
 		)
 		result["warning"] = (
-			f"Ticket saved, but the combined cost wasn't logged — ask Finance to set an FX rate "
+			f"Ticket saved, but the ticket cost wasn't logged — ask Finance to set an FX rate "
 			f"for {combined_currency} (finance_api.set_fx_rate), then retry by calling "
 			f"record_ticket_details again (it will still be unlogged, so it will retry)."
 		)

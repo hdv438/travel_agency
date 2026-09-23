@@ -52,6 +52,7 @@
   "flight_date",
   "ticket_cost",
   "corridor_fees_logged",
+  "legacy_lump_fees",
   "col_break_ticketing",
   "is_rescheduled",
   "reschedule_date",
@@ -350,6 +351,15 @@
    "read_only": 1
   },
   {
+   "fieldname": "legacy_lump_fees",
+   "fieldtype": "Check",
+   "label": "Legacy Lump-Sum Fees",
+   "default": "0",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "Set by patch stage_fees_setup: this placement's corridor fees were already recorded in the old combined ticketing entry, so per-step fees are never recorded for it."
+  },
+  {
    "fieldname": "col_break_ticketing",
    "fieldtype": "Column Break"
   },
@@ -423,7 +433,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-19 00:00:00.000000",
+ "modified": "2026-09-23 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agency Tracking",
  "name": "Placement",

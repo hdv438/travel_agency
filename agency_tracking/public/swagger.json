@@ -3298,7 +3298,7 @@
           "Finance"
         ],
         "summary": "Log an expense",
-        "description": "Open to any internal staff role -- Finance Manager/Admin approval (approve_transaction) is the real gate, not who's allowed to log. placement is optional (general office expenses are loggable too). Do NOT use this for LMIS/Kuwait LMIS/Telesign/Taeshir/Embassy/Kuwait Embassy clearance-step costs (stage set to one of those step types) -- since 2026-09-19 those are known-in-advance fees configured on Corridor Definition.known_fees and get auto-summed with ticket_cost into a single already-Approved expense the moment placement_api.record_ticket_details is called; a manual log here would double-count them. Still the right endpoint for genuinely ad-hoc costs (reschedule fees, general office expenses, anything not in known_fees).",
+        "description": "Open to any internal staff role -- Finance Manager/Admin approval (approve_transaction) is the real gate, not who's allowed to log. placement is optional (general office expenses are loggable too). Do NOT use this for LMIS/Kuwait LMIS/Telesign/Taeshir/Embassy/Kuwait Embassy clearance-step costs (stage set to one of those step types) -- those are known-in-advance fees configured on Corridor Definition.known_fees, and since 2026-09-23 each is recorded automatically as its own already-Approved expense when its clearance step completes; a manual log here would double-count them. Still the right endpoint for genuinely ad-hoc costs (reschedule fees, general office expenses, anything not in known_fees).",
         "x-roles": [
           "Any internal staff role"
         ],
@@ -3378,7 +3378,7 @@
           "Finance"
         ],
         "summary": "Log income",
-        "description": "Same shape/permissions as log_stage_expense. Same caveat applies: don't use this for LMIS/Kuwait LMIS/Telesign/Taeshir/Embassy/Kuwait Embassy clearance-step costs -- those are auto-logged (as Expense, not Income) via Corridor Definition.known_fees at ticketing time. See log_stage_expense's description.",
+        "description": "Same shape/permissions as log_stage_expense. Same caveat applies: don't use this for LMIS/Kuwait LMIS/Telesign/Taeshir/Embassy/Kuwait Embassy clearance-step costs -- those are auto-logged (as Expense, not Income) from Corridor Definition.known_fees when each clearance step completes. See log_stage_expense's description.",
         "x-roles": [
           "Any internal staff role"
         ],
@@ -4866,7 +4866,7 @@
           "Placement"
         ],
         "summary": "Record ticket number/flight date, auto-logs corridor fees + cost as one expense",
-        "description": "2026-09-19: ticket_cost is summed with this placement's corridor's known_fees (LMIS/Insurance/Taeshir/Injaz/Wakala/Kuwait LMIS/Police Ashara -- Corridor Definition.known_fees) into ONE already-Approved Applicant Transaction expense (no Finance review needed, same as commission accrual) the FIRST time this is called for a placement -- see Placement.corridor_fees_logged, which prevents a later correction call (e.g. fixing the ticket number) from re-logging it. currency, if given, must match the corridor's known_fees currency (417 if not) since they're summed into one transaction; omit it to default to that currency automatically. Blocked (417) once the Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-1).",
+        "description": "ticket_cost is logged as ONE already-Approved Applicant Transaction expense (no Finance review needed) the FIRST time this is called for a placement -- see Placement.corridor_fees_logged, which prevents a later correction call (e.g. fixing the ticket number) from re-logging it. 2026-09-23: corridor known fees are no longer added in here -- each is recorded on its own, already-Approved, when its clearance step completes (fee_type/clearance_step set on the transaction); this call also records any stage fee still missing (e.g. one whose FX rate was missing at the time). Blocked (417) once the Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-1).",
         "x-roles": [
           "Ticketer",
           "Write access to the Placement"
@@ -4904,7 +4904,7 @@
             "name": "currency",
             "in": "formData",
             "type": "string",
-            "description": "Must match this corridor's known_fees currency if that corridor has any non-zero fee configured (417 otherwise). Defaults to the corridor's known_fees currency, or ETB if the corridor has none configured.",
+            "description": "Currency of ticket_cost. Defaults to ETB.",
             "required": false
           }
         ],

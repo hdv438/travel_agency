@@ -801,6 +801,11 @@ def forfeit_injaz_and_restart(clearance_step_name=None, reason=None, new_appoint
 		 "injaz_application_id": new_injaz_application_id},
 	)
 	step.save(ignore_permissions=True)
+	if prior_outcome == "Forfeited":
+		# The paid fee is lost and the next attempt is paid again -- record this one now (#12).
+		from agency_tracking.stage_fees import post_forfeited_injaz_fee
+
+		post_forfeited_injaz_fee(step, current)
 	log_action("Clearance Step", step.name, f"[{step.title or step.name}] Injaz {prior_outcome or 'restarted'} ({reason}); new attempt {new_injaz_application_id or '-'} on {new_appointment_date or '-'}")
 	return step.as_dict()
 

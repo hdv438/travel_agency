@@ -71,6 +71,13 @@ class ClearanceStep(Document):
 		else:
 			self.title = self.name
 
+	def on_update(self):
+		# Client item #12 (2026-09-23): a completed step records its configured corridor fees as
+		# auto-Approved Expenses. Idempotent, so corrections / reopen + re-complete never re-post.
+		from agency_tracking.stage_fees import post_step_fees
+
+		post_step_fees(self)
+
 	def before_save(self):
 		from agency_tracking.storage_engine import migrate_attach_to_r2
 

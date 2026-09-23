@@ -86,9 +86,9 @@ def log_stage_expense(amount=None, currency=None, description=None, placement=No
 
 	2026-09-19: do NOT use this with stage set to a clearance step type (LMIS Clearance/Kuwait
 	LMIS/Telesign/Taeshir/Embassy/Kuwait Embassy) -- those costs are now known in advance
-	(Corridor Definition.known_fees) and get auto-summed with ticket_cost into a single already-
-	Approved expense the moment placement_api.record_ticket_details is called. A manual log here
-	for one of those stages would double-count it."""
+	(Corridor Definition.known_fees), and since 2026-09-23 each is recorded as its own already-
+	Approved expense when its clearance step completes (stage_fees.py). A manual log here for
+	one of those fees would double-count it."""
 	amount = amount or kwargs.get("amount_original") or kwargs.get("amount_birr")
 	currency = currency or kwargs.get("currency_original") or "ETB"
 	description = description or kwargs.get("reference_text") or kwargs.get("remarks") or "Expense"
@@ -224,7 +224,7 @@ def list_transactions(
 			"name", "applicant", "placement", "transaction_type", "stage_logged_at", "status",
 			"amount_original", "currency_original", "amount_birr", "description",
 			"logged_by", "approved_by", "approved_on", "rejection_reason",
-			"commission_batch_request", "creation",
+			"commission_batch_request", "clearance_step", "fee_type", "creation",
 		],
 		order_by=order_by,
 		limit_start=start,

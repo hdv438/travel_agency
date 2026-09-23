@@ -16,3 +16,4 @@ agency_tracking.patches.backfill_complaint_display_no
 agency_tracking.patches.raise_max_file_size_for_r2
 agency_tracking.patches.backfill_country_ban_active_flag
 agency_tracking.patches.uppercase_applicant_names
+agency_tracking.patches.stage_fees_setup

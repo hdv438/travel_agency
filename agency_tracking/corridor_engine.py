@@ -8,7 +8,6 @@
 # correct results back.
 
 import frappe
-from frappe.utils import flt
 
 
 @frappe.whitelist()
@@ -46,29 +45,3 @@ def is_last_step(destination_country, sequence_order):
 	return bool(steps) and sequence_order == steps[-1]["sequence_order"]
 
 
-def get_corridor_known_fees_total(destination_country):
-	"""(total_amount, currency) across every known_fees row configured for this corridor (LMIS,
-	Insurance, Taeshir, Injaz, Wakala, Kuwait LMIS, Police Ashara) -- summed into a single
-	ticketing-time Expense by placement_api.record_ticket_details, replacing the old per-stage
-	manual income/expense logging (2026-09-19, product decision). Returns (0, None) when the
-	corridor has no known_fees rows at all -- distinct from "rows exist but total to 0" (which
-	returns whatever currency the rows declared, even though the number is 0), so a caller can
-	tell "nothing configured" apart from "configured at zero"."""
-	if not destination_country:
-		return 0, None
-	corridor_name = frappe.db.get_value(
-		"Corridor Definition", {"destination_country": destination_country}, "name"
-	)
-	if not corridor_name:
-		return 0, None
-	rows = frappe.get_all(
-		"Corridor Known Fee", filters={"parent": corridor_name}, fields=["amount", "currency"]
-	)
-	if not rows:
-		return 0, None
-	total = sum(flt(row.amount) for row in rows)
-	# CorridorDefinition.validate_known_fees_single_currency already enforces this at save time
-	# for non-zero rows -- this just picks a currency to report against `total`, preferring one
-	# that's actually attached to money rather than a zero row's placeholder value.
-	currency = next((row.currency for row in rows if flt(row.amount)), rows[0].currency)
-	return total, currency
