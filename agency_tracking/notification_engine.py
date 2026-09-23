@@ -167,6 +167,22 @@ def _render_notification(template, context):
 			f"{job_type} {status}",
 			f"Your {job_type} job for {context.get('reference_doctype')} {context.get('reference_name')} is {status}.",
 		)
+	if template == "country_ban_request":
+		what = f"a one-time override ({context.get('action')})" if context.get("request_type") == "Override" else "lifting the ban"
+		return (
+			"Country Ban Request",
+			f"{context.get('requested_by')} requests {what} for {context.get('applicant')} on "
+			f"{context.get('country')} ({context.get('request')}): {context.get('reason')}",
+		)
+	if template == "country_ban_request_decided":
+		outcome = context.get("status")
+		extra = " -- retry the action now; it will go through once." if outcome == "Approved" and context.get("request_type") == "Override" else ""
+		return (
+			f"Country Ban Request {outcome}",
+			f"Your {str(context.get('request_type')).lower()} request {context.get('request')} for "
+			f"{context.get('applicant')} on {context.get('country')} was {str(outcome).lower()}{extra}"
+			+ (f" Note: {context.get('note')}" if context.get("note") else ""),
+		)
 	if template and template.startswith("country_ban_"):
 		event = template[len("country_ban_") :].replace("_", " ").title()
 		return (

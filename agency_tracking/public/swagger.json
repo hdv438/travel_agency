@@ -905,7 +905,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "Draft -> Registered",
-        "description": "Field-floor and medical checks run inside Applicant.validate(), triggered by the sanctioned transition() path. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides.",
+        "description": "Field-floor and medical checks run inside Applicant.validate(), triggered by the sanctioned transition() path. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides or an approved Country Ban Request pass exists (see request_country_ban_exception).",
         "x-roles": [
           "Write access to the Applicant"
         ],
@@ -967,7 +967,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "Restart a Cancelled Applicant",
-        "description": "Cancelled -> Draft or Registered. cycle_number bumps automatically. Restarting straight to Registered fails naturally if the field floor isn't actually satisfied. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides -- checked on every restart, since this is how a cancelled applicant re-enters the pipeline.",
+        "description": "Cancelled -> Draft or Registered. cycle_number bumps automatically. Restarting straight to Registered fails naturally if the field floor isn't actually satisfied. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides or an approved Country Ban Request pass exists -- checked on every restart, since this is how a cancelled applicant re-enters the pipeline.",
         "x-roles": [
           "Write access to the Applicant"
         ],
@@ -2860,7 +2860,7 @@
           "CV Generation"
         ],
         "summary": "Generate and attach the official Agency CV PDF",
-        "description": "Standard track, Registered status only. Renders via a Frappe Print Format, mirrors to Cloudflare R2 (falls back to a local private file if Storage Settings isn't configured). Moves the Applicant to CV Generated. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides -- CV Generated is what makes an applicant visible in the agency portal.",
+        "description": "Standard track, Registered status only. Renders via a Frappe Print Format, mirrors to Cloudflare R2 (falls back to a local private file if Storage Settings isn't configured). Moves the Applicant to CV Generated. Refused (403) if the applicant has an active country ban on their destination_country, unless a Manager/Admin overrides or an approved Country Ban Request pass exists -- CV Generated is what makes an applicant visible in the agency portal.",
         "x-roles": [
           "Write access to the Applicant"
         ],
@@ -8762,6 +8762,224 @@
             "description": "Validation error"
           }
         }
+      }
+    },
+    "/api/method/agency_tracking.applicant_api.request_country_ban_exception": {
+      "post": {
+        "tags": [
+          "Applicant Lifecycle"
+        ],
+        "summary": "Ask a Manager to override or lift a country ban",
+        "description": "For a staff member blocked by an active country ban. Override = a one-time pass for one action (Register / Generate CV / Restart / Change Destination): once a Manager approves, retrying that action goes through exactly once (status Approved -> Used); the ban stays. Lift = on approval the ban is lifted. Managers get one notification per request. Refused if there's no active ban, an identical request is already Pending, or an approved override for that action is still unused.",
+        "x-roles": [
+          "Anyone with write access to the Applicant (Registrar, Manager, Admin)"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "applicant_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "request_type",
+            "in": "formData",
+            "type": "string",
+            "required": true,
+            "enum": [
+              "Override",
+              "Lift"
+            ]
+          },
+          {
+            "name": "reason",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "action",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Required for Override",
+            "enum": [
+              "Register",
+              "Generate CV",
+              "Restart",
+              "Change Destination"
+            ]
+          },
+          {
+            "name": "country",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "description": "Defaults to the applicant's destination_country; for a Change Destination override pass the country being changed TO"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "description": "Country Ban Request: name (CBR-xxxxx), applicant, country, ban, request_type, action, status (Pending/Approved/Rejected/Used), reason, requested_by, requested_on, decided_by, decided_on, decision_note, used_on"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.applicant_api.list_country_ban_requests": {
+      "post": {
+        "tags": [
+          "Applicant Lifecycle"
+        ],
+        "summary": "List country ban requests",
+        "description": "Managers/Admins see all requests; anyone else only the ones they raised. Newest first.",
+        "x-roles": [
+          "Registrar (own)",
+          "Manager",
+          "Admin"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "formData",
+            "type": "string",
+            "required": false,
+            "enum": [
+              "Pending",
+              "Approved",
+              "Rejected",
+              "Used"
+            ]
+          },
+          {
+            "name": "applicant_name",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "Country Ban Request: name (CBR-xxxxx), applicant, country, ban, request_type, action, status (Pending/Approved/Rejected/Used), reason, requested_by, requested_on, decided_by, decided_on, decision_note, used_on"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/method/agency_tracking.applicant_api.decide_country_ban_request": {
+      "post": {
+        "tags": [
+          "Applicant Lifecycle"
+        ],
+        "summary": "Approve or reject a country ban request",
+        "description": "Approve an Override -> the requester can retry that one action once. Approve a Lift -> the ban is lifted immediately (lift_reason records the request). Reject -> nothing changes. The requester is notified either way. Refused if already decided, or (on Approve) if the ban was lifted in the meantime.",
+        "x-roles": [
+          "Manager",
+          "Admin",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "request_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "decision",
+            "in": "formData",
+            "type": "string",
+            "required": true,
+            "enum": [
+              "Approve",
+              "Reject"
+            ]
+          },
+          {
+            "name": "note",
+            "in": "formData",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "description": "Country Ban Request: name (CBR-xxxxx), applicant, country, ban, request_type, action, status (Pending/Approved/Rejected/Used), reason, requested_by, requested_on, decided_by, decided_on, decision_note, used_on"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
       }
     }
   },

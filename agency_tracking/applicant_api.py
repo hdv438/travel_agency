@@ -37,7 +37,7 @@ def create_applicant(**data):
 	return doc.as_dict()
 
 
-def _check_country_ban_or_throw(applicant_name, country, override, override_reason):
+def _check_country_ban_or_throw(applicant_name, country, override, override_reason, action=None):
 	"""'Ashara Teyezuwal' (2026-08-29): a permanent per-(Applicant, Country) blacklist. Only
 	active=1 rows block anything -- a lifted ban (remove_country_ban) is kept for history but no
 	longer enforced. Manager/Admin can force past an active ban with a written reason -- same
@@ -48,7 +48,13 @@ def _check_country_ban_or_throw(applicant_name, country, override, override_reas
 	foreign agency or commit them to that country: update_applicant (on a destination_country
 	change), register_applicant, cv_api.generate_cv, restart_applicant, and as a backstop in
 	portal_api.select_candidate. portal_api.list_portal_candidates filters banned
-	applicants out of the marketplace listing separately (a list filter, not a throw)."""
+	applicants out of the marketplace listing separately (a list filter, not a throw).
+
+	`action` (one of COUNTRY_BAN_ACTIONS) lets a blocked staff member retry after a Manager
+	approved a Country Ban Request Override for exactly that action: the pass is consumed here
+	(status Approved -> Used) and the check passes once. A blocked attempt no longer notifies
+	anyone (2026-09-23) -- the blocked user raises a request via request_country_ban_exception
+	instead, and Managers are notified once per request."""
 	if not country:
 		return
 	ban = frappe.db.get_value(
@@ -61,14 +67,12 @@ def _check_country_ban_or_throw(applicant_name, country, override, override_reas
 	ban_name, ban_reason = ban
 
 	if not override:
-		_notify_management_of_ban_event(applicant_name, country, ban_name, "blocked", ban_reason)
-		# notify() writes a Comms Log row inside this same request's transaction; the frappe.throw
-		# below aborts the request, and an unhandled exception rolls back everything uncommitted
-		# in it. Commit here so the "blocked" notification survives the throw it's reporting on.
-		frappe.db.commit()
+		if action and _consume_override_pass(ban_name, action):
+			return
 		frappe.throw(
 			f"{applicant_name} is permanently banned from {country} (see {ban_name}). "
-			"A Manager or Admin must override this with a written reason to proceed.",
+			"A Manager or Admin must override this with a written reason, or you can request an "
+			"override or lift (request_country_ban_exception).",
 			frappe.PermissionError,
 		)
 
@@ -78,6 +82,24 @@ def _check_country_ban_or_throw(applicant_name, country, override, override_reas
 		frappe.throw("A written reason is required to override a country ban.", frappe.ValidationError)
 
 	_notify_management_of_ban_event(applicant_name, country, ban_name, "overridden", override_reason)
+
+
+def _consume_override_pass(ban_name, action):
+	"""Mark one approved Override request for exactly this ban + action as Used. Keyed on the ban
+	(not applicant + country) so a leftover pass from a since-lifted ban can't unlock a newer one.
+	Runs inside the caller's transaction, so if the unlocked action itself then fails and the
+	request rolls back, the pass is un-consumed with it and can be retried."""
+	req = frappe.db.get_value(
+		"Country Ban Request",
+		{"ban": ban_name, "request_type": "Override", "action": action, "status": "Approved"},
+		"name",
+		order_by="decided_on asc",
+		for_update=True,
+	)
+	if not req:
+		return False
+	frappe.db.set_value("Country Ban Request", req, {"status": "Used", "used_on": frappe.utils.now_datetime()})
+	return True
 
 
 def _notify_management_of_ban_event(applicant_name, country, ban_name, event, reason):
@@ -115,7 +137,7 @@ def update_applicant(applicant_name=None, override_ban=False, override_reason=No
 		# to nothing new -- register_applicant, generate_cv, restart_applicant, select_candidate and
 		# the portal listing each enforce the ban themselves -- and checking it here would block
 		# every routine edit of a banned applicant (and notify every Manager each time).
-		_check_country_ban_or_throw(applicant_name, new_country, override_ban, override_reason)
+		_check_country_ban_or_throw(applicant_name, new_country, override_ban, override_reason, action="Change Destination")
 
 	doc.update(data)
 	if "entry_track" in data and data["entry_track"] != doc.entry_track and doc.status in CYCLE_REGRESSION_STATUSES:
@@ -237,7 +259,7 @@ def restart_applicant(applicant_name=None, target_status=None, override_ban=Fals
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if doc.status != "Cancelled":
 		frappe.throw(f"Only a Cancelled applicant can be restarted (currently '{doc.status}').", frappe.ValidationError)
-	_check_country_ban_or_throw(applicant_name, doc.destination_country, override_ban, override_reason)
+	_check_country_ban_or_throw(applicant_name, doc.destination_country, override_ban, override_reason, action="Restart")
 	transition(doc, target_status)
 	return doc.as_dict()
 
@@ -263,7 +285,7 @@ def register_applicant(applicant_name=None, override_ban=False, override_reason=
 		data = {k: v for k, v in kwargs.items() if k not in ("cmd", "applicant_name", "name", "applicant")}
 		if data:
 			doc.update(data)
-	_check_country_ban_or_throw(applicant_name, doc.destination_country, override_ban, override_reason)
+	_check_country_ban_or_throw(applicant_name, doc.destination_country, override_ban, override_reason, action="Register")
 	transition(doc, "Registered")
 	frappe.db.commit()
 	return doc.as_dict()
@@ -375,3 +397,143 @@ def remove_country_ban(ban_name=None, applicant_name=None, country=None, lift_re
 	ban.save()
 	_notify_management_of_ban_event(ban.applicant, ban.country, ban.name, "removed", lift_reason or "No reason given.")
 	return {"lifted": ban_name, "status": "success"}
+
+
+# --- Country Ban Requests (2026-09-23) ---
+# A staff member blocked by an active ban asks a Manager/Admin for either a one-time Override of
+# one specific action, or a Lift of the ban. Managers get one notification per request (not per
+# blocked attempt); the requester is notified of the decision.
+
+COUNTRY_BAN_ACTIONS = ("Register", "Generate CV", "Restart", "Change Destination")
+COUNTRY_BAN_DECIDER_ROLES = {"Manager", "Admin", "System Manager"}
+
+
+def _is_ban_decider():
+	return frappe.session.user == "Administrator" or bool(COUNTRY_BAN_DECIDER_ROLES & set(frappe.get_roles()))
+
+
+@frappe.whitelist()
+def request_country_ban_exception(applicant_name=None, request_type=None, reason=None, action=None, country=None, **kwargs):
+	"""Ask a Manager/Admin to Override (one-time pass for `action`) or Lift an active country ban.
+	`country` defaults to the applicant's destination_country; pass it explicitly for a
+	"Change Destination" override (the country being changed TO). Open to anyone with write
+	access to the Applicant -- i.e. whoever could have been blocked by the ban."""
+	if not applicant_name:
+		frappe.throw("applicant_name is required.", frappe.ValidationError)
+	if request_type not in ("Override", "Lift"):
+		frappe.throw("request_type must be 'Override' or 'Lift'.", frappe.ValidationError)
+	if request_type == "Override" and action not in COUNTRY_BAN_ACTIONS:
+		frappe.throw(f"action is required for an Override and must be one of: {', '.join(COUNTRY_BAN_ACTIONS)}.", frappe.ValidationError)
+	if request_type == "Lift":
+		action = None
+	if not reason:
+		frappe.throw("A written reason is required.", frappe.ValidationError)
+
+	applicant = frappe.get_doc("Applicant", applicant_name)
+	if not applicant.has_permission("write"):
+		frappe.throw("Not permitted.", frappe.PermissionError)
+	country = country or applicant.destination_country
+	if not country:
+		frappe.throw("country is required (the applicant has no destination_country).", frappe.ValidationError)
+
+	ban = frappe.db.get_value("Applicant Country Ban", {"applicant": applicant_name, "country": country, "active": 1}, "name")
+	if not ban:
+		frappe.throw(f"{applicant_name} has no active country ban for {country}.", frappe.ValidationError)
+
+	open_filters = {"applicant": applicant_name, "country": country, "request_type": request_type, "status": "Pending"}
+	if action:
+		open_filters["action"] = action
+	existing = frappe.db.get_value("Country Ban Request", open_filters, "name")
+	if existing:
+		frappe.throw(f"A matching request is already pending ({existing}).", frappe.ValidationError)
+	if action and frappe.db.exists("Country Ban Request", {**open_filters, "status": "Approved"}):
+		frappe.throw("An approved override for this action is already waiting to be used -- just retry the action.", frappe.ValidationError)
+
+	req = frappe.get_doc(
+		{
+			"doctype": "Country Ban Request",
+			"applicant": applicant_name,
+			"country": country,
+			"ban": ban,
+			"request_type": request_type,
+			"action": action,
+			"reason": reason,
+			"status": "Pending",
+			"requested_by": frappe.session.user,
+			"requested_on": frappe.utils.now_datetime(),
+		}
+	).insert(ignore_permissions=True)
+
+	from agency_tracking.notification_engine import notify
+
+	for user in frappe.get_all("Has Role", filters={"role": "Manager", "parenttype": "User"}, pluck="parent", distinct=True):
+		notify(
+			user,
+			"country_ban_request",
+			{"request": req.name, "request_type": request_type, "action": action, "applicant": applicant_name,
+			 "country": country, "requested_by": frappe.session.user, "reason": reason},
+		)
+	return req.as_dict()
+
+
+@frappe.whitelist()
+def list_country_ban_requests(status=None, applicant_name=None, **kwargs):
+	"""Managers/Admins see every request; anyone else only their own."""
+	filters = {}
+	if status:
+		filters["status"] = status
+	if applicant_name:
+		filters["applicant"] = applicant_name
+	if not _is_ban_decider():
+		if not frappe.has_permission("Country Ban Request", "read"):
+			frappe.throw("Not permitted.", frappe.PermissionError)
+		filters["requested_by"] = frappe.session.user
+	return frappe.get_all(
+		"Country Ban Request",
+		filters=filters,
+		fields=[
+			"name", "applicant", "country", "ban", "request_type", "action", "status", "reason",
+			"requested_by", "requested_on", "decided_by", "decided_on", "decision_note", "used_on",
+		],
+		order_by="creation desc",
+	)
+
+
+@frappe.whitelist()
+def decide_country_ban_request(request_name=None, decision=None, note=None, **kwargs):
+	"""Manager/Admin/System Manager. Approve an Override -> a one-time pass the requester's retry
+	of that action consumes. Approve a Lift -> the ban is lifted now. Reject -> nothing changes."""
+	if not _is_ban_decider():
+		frappe.throw("Only a Manager or Admin can decide a country ban request.", frappe.PermissionError)
+	if not request_name:
+		frappe.throw("request_name is required.", frappe.ValidationError)
+	if decision not in ("Approve", "Reject"):
+		frappe.throw("decision must be 'Approve' or 'Reject'.", frappe.ValidationError)
+
+	req = frappe.get_doc("Country Ban Request", request_name, for_update=True)
+	if req.status != "Pending":
+		frappe.throw(f"{request_name} was already decided ({req.status}).", frappe.ValidationError)
+
+	if decision == "Approve" and not frappe.db.get_value("Applicant Country Ban", req.ban, "active"):
+		# Ban lifted some other way since the request was raised -- nothing left to approve.
+		frappe.throw(f"The ban {req.ban} is no longer active; this request is moot. Reject it instead.", frappe.ValidationError)
+
+	req.status = "Approved" if decision == "Approve" else "Rejected"
+	req.decided_by = frappe.session.user
+	req.decided_on = frappe.utils.now_datetime()
+	req.decision_note = note
+	req.save(ignore_permissions=True)
+
+	if decision == "Approve" and req.request_type == "Lift":
+		lift_reason = f"Approved request {req.name}: {req.reason}" + (f" -- {note}" if note else "")
+		remove_country_ban(ban_name=req.ban, lift_reason=lift_reason)
+
+	from agency_tracking.notification_engine import notify
+
+	notify(
+		req.requested_by,
+		"country_ban_request_decided",
+		{"request": req.name, "request_type": req.request_type, "action": req.action, "applicant": req.applicant,
+		 "country": req.country, "status": req.status, "note": note},
+	)
+	return req.as_dict()

@@ -141,7 +141,7 @@ def generate_cv(applicant_name=None, override_ban=False, override_reason=None, *
 		return {"cv_record": cv_name, "applicant_status": "CV Generated"}
 
 	from agency_tracking.applicant_api import _check_country_ban_or_throw
-	_check_country_ban_or_throw(applicant_name, applicant.destination_country, override_ban, override_reason)
+	_check_country_ban_or_throw(applicant_name, applicant.destination_country, override_ban, override_reason, action="Generate CV")
 
 	cv = frappe.get_doc({"doctype": "CV Record", "applicant": applicant_name}).insert()
 
