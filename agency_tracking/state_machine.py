@@ -12,7 +12,7 @@
 import traceback
 
 import frappe
-from frappe.utils import get_datetime
+from frappe.utils import get_datetime, getdate, today
 
 
 def log_action(reference_doctype, reference_name, remarks, event_type="Action", actor=None):
@@ -359,10 +359,24 @@ STAGE_GATES[("Ticketed", "Departed")] = departure_gate
 
 
 def medical_selected_gate(placement):
+	"""2026-09-23 product decision: a registration-time FIT (Applicant.medical_status) that hasn't
+	expired yet (medical_expiry_date on or after today) counts for this check too -- a new exam
+	is only needed when that one is missing, expired, undated or not FIT."""
 	if placement.medical_selected_status == "FIT":
 		return True
+	applicant = frappe.db.get_value(
+		"Applicant", placement.applicant, ["medical_status", "medical_expiry_date"], as_dict=True
+	)
+	if (
+		applicant
+		and applicant.medical_status == "FIT"
+		and applicant.medical_expiry_date
+		and getdate(applicant.medical_expiry_date) >= getdate(today())
+	):
+		return True
 	return (
-		f"medical (Selected stage) status is '{placement.medical_selected_status}', must be FIT. "
+		f"medical (Selected stage) status is '{placement.medical_selected_status}', must be FIT, and the "
+		"registration medical isn't a usable substitute (not FIT, no expiry date, or expired). "
 		"Record it via placement_api.record_selected_medical_result."
 	)
 

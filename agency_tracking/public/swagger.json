@@ -4758,7 +4758,7 @@
           "Placement"
         ],
         "summary": "Record the post-contract medical result",
-        "description": "Gates Selected -> Processing. FIT just records the result; UNFIT cancels the whole Applicant + Placement via the same cascade as cancel_applicant. Blocked (417) once the Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-1).",
+        "description": "Gates Selected -> Processing. FIT just records the result; UNFIT cancels the whole Applicant + Placement via the same cascade as cancel_applicant. Blocked (417) once the Placement is already Departed/Cancelled (cc2 QA pass, backend-issues NEW-1). 2026-09-23: this exam is only needed when the applicant's registration medical (Applicant.medical_status) isn't FIT with an unexpired medical_expiry_date -- a valid registration FIT already satisfies the Selected -> Processing check.",
         "x-roles": [
           "Write access to the Placement"
         ],
