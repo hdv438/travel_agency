@@ -10,6 +10,7 @@
 
 import frappe
 
+from agency_tracking.pagination import count_rows, page_args, paged_result
 from agency_tracking.state_machine import log_action
 
 CONTRACTOR_MANAGE_ROLES = {"Manager", "Admin", "Finance Manager", "Registrar", "Communication Manager", "System Manager"}
@@ -53,7 +54,7 @@ def create_contractor(contractor_name=None, country=None, user_email=None, user_
 
 
 @frappe.whitelist()
-def list_contractors(filters=None, limit_page_length=100):
+def list_contractors(filters=None, limit_page_length=100, limit_start=0, with_total=0):
 	"""Read surface for picking an existing agency (create_muayena_placement's contractor_name,
 	Finance's batching/rate lookups). Same role gate as create_contractor -- the doctype's own
 	permlevel-0 grants don't cover Registrar/Finance Manager at all, so this uses an explicit
@@ -63,13 +64,16 @@ def list_contractors(filters=None, limit_page_length=100):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	if isinstance(filters, str):
 		filters = frappe.parse_json(filters)
-	return frappe.get_all(
+	start, length = page_args(limit_start, limit_page_length)
+	rows = frappe.get_all(
 		"Contractor",
 		filters=filters,
 		fields=["name", "contractor_name", "country", "user", "communication_manager"],
-		limit_page_length=frappe.utils.cint(limit_page_length) or 100,
+		limit_start=start,
+		limit_page_length=length,
 		order_by="modified desc",
 	)
+	return paged_result(rows, with_total, lambda: count_rows("Contractor", filters, ignore_permissions=True))
 
 
 # Contractor edit is a management action (matches create_contractor's gate).

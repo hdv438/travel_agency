@@ -8,6 +8,7 @@
 
 import frappe
 
+from agency_tracking.pagination import count_rows, page_args, paged_result
 from agency_tracking.state_machine import transition
 
 CYCLE_REGRESSION_STATUSES = ("Registered", "CV Generated")
@@ -305,7 +306,7 @@ def get_applicant(applicant_name=None, **kwargs):
 
 
 @frappe.whitelist()
-def list_applicants(filters=None, limit_page_length=100, order_by="modified desc"):
+def list_applicants(filters=None, limit_page_length=100, order_by="modified desc", limit_start=0, with_total=0):
 	"""backend-issues #02: the whitelisted list surface Applicant never had -- callers used to
 	fall back to raw /api/resource/Applicant, which only Registrar/Manager/Admin/System Manager
 	could read (Applicant's doctype-level permissions), 403ing every other role that legitimately
@@ -315,13 +316,16 @@ def list_applicants(filters=None, limit_page_length=100, order_by="modified desc
 	way it would for any other doctype; no separate role check needed here."""
 	if isinstance(filters, str):
 		filters = frappe.parse_json(filters)
-	return frappe.get_list(
+	start, length = page_args(limit_start, limit_page_length)
+	rows = frappe.get_list(
 		"Applicant",
 		filters=filters,
 		fields=["*"],
-		limit_page_length=frappe.utils.cint(limit_page_length) or 100,
+		limit_start=start,
+		limit_page_length=length,
 		order_by=order_by,
 	)
+	return paged_result(rows, with_total, lambda: count_rows("Applicant", filters))
 
 
 @frappe.whitelist()

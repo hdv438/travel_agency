@@ -8,6 +8,7 @@
 
 import frappe
 
+from agency_tracking.pagination import count_rows, page_args, paged_result
 from agency_tracking.state_machine import lock_applicant_row
 
 # Non-PII browsing fields only (business names/skills, not passport/national ID/phone/address/
@@ -194,7 +195,7 @@ def _get_latest_cv_record(applicant_name):
 
 
 @frappe.whitelist()
-def list_portal_candidates(target_job=None, gender=None, **kwargs):
+def list_portal_candidates(target_job=None, gender=None, limit_start=0, limit_page_length=0, with_total=0, **kwargs):
 	"""business-workflow-srs.md: "Contractors can browse available registered candidates (CV
 	status), filtered by their quota country." Only CV Generated candidates (Part A.2 Stage 4);
 	only the contractor's own country."""
@@ -243,11 +244,16 @@ def list_portal_candidates(target_job=None, gender=None, **kwargs):
 	if banned_names:
 		filters["name"] = ["not in", banned_names]
 
+	# default=0: every candidate when no page size is given (its historical behavior).
+	start, length = page_args(limit_start, limit_page_length, default=0)
 	rows = frappe.get_list(
 		"Applicant",
 		filters=filters,
 		fields=PORTAL_FIELDS,
 		ignore_permissions=True,
+		limit_start=start,
+		limit_page_length=length,
+		order_by="modified desc",
 	)
 	# Resolve any R2-stored media (photograph/photo_full_body/experience_video/passport_scan --
 	# see storage_engine.py's 2026-09-21 private-bucket rewrite) to short-lived signed URLs. A
@@ -255,7 +261,9 @@ def list_portal_candidates(target_job=None, gender=None, **kwargs):
 	from agency_tracking.storage_engine import resolve_r2_fields
 
 	resolve_r2_fields(rows, ["photograph", "photo_full_body", "experience_video", "passport_scan"])
-	return _portal_medical_status(rows)
+	return paged_result(
+		_portal_medical_status(rows), with_total, lambda: count_rows("Applicant", filters, ignore_permissions=True)
+	)
 
 
 def _assert_can_view_candidate(applicant_name):
@@ -458,7 +466,7 @@ def select_candidate(applicant_name=None, free_replacement_for_complaint=None, c
 
 
 @frappe.whitelist()
-def list_my_placements(status=None, limit_page_length=100, limit_start=0, order_by="modified desc", contractor_name=None, **kwargs):
+def list_my_placements(status=None, limit_page_length=100, limit_start=0, order_by="modified desc", contractor_name=None, with_total=0, **kwargs):
 	"""Foreign Agency's own placement read surface (backend-issues, multi-tenant audit).
 
 	placement_api.list_placements is internal-staff-only (Placement's doctype-level read grants
@@ -471,15 +479,17 @@ def list_my_placements(status=None, limit_page_length=100, limit_start=0, order_
 	filters = {"contractor": contractor.name}
 	if status:
 		filters["status"] = status
-	return frappe.get_all(
+	start, length = page_args(limit_start, limit_page_length)
+	rows = frappe.get_all(
 		"Placement",
 		filters=filters,
 		fields=PORTAL_PLACEMENT_FIELDS,
-		limit_page_length=frappe.utils.cint(limit_page_length) or 100,
-		limit_start=frappe.utils.cint(limit_start),
+		limit_page_length=length,
+		limit_start=start,
 		order_by=order_by,
 		ignore_permissions=True,
 	)
+	return paged_result(rows, with_total, lambda: count_rows("Placement", filters, ignore_permissions=True))
 
 
 @frappe.whitelist()

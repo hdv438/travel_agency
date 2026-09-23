@@ -590,7 +590,7 @@
           "Applicant Lifecycle"
         ],
         "summary": "List Applicants the caller's role can read",
-        "description": "backend-issues #02: whitelisted replacement for the raw /api/resource/Applicant fallback. Enforces the doctype's own permissions (Registrar, Manager, Admin, System Manager, Finance Manager, Clearance Officer, Complaint Manager, Communication Manager, and the six country+step roles).",
+        "description": "backend-issues #02: whitelisted replacement for the raw /api/resource/Applicant fallback. Enforces the doctype's own permissions (Registrar, Manager, Admin, System Manager, Finance Manager, Clearance Officer, Complaint Manager, Communication Manager, and the six country+step roles). Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total.",
         "x-roles": [
           "Read access to the Applicant"
         ],
@@ -611,7 +611,7 @@
             "in": "formData",
             "type": "integer",
             "required": false,
-            "default": 100
+            "description": "Page size, clamped to 1-500. Blank/0 = 100."
           },
           {
             "name": "order_by",
@@ -619,6 +619,22 @@
             "type": "string",
             "required": false,
             "default": "modified desc"
+          },
+          {
+            "name": "limit_start",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 0,
+            "description": "Offset (rows to skip)."
+          },
+          {
+            "name": "with_total",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "default": false,
+            "description": "If true, the response is {\"data\": [...], \"total_count\": N} instead of a bare list. total_count uses the same filters and permission scope as the rows."
           }
         ],
         "responses": {
@@ -4430,7 +4446,7 @@
           "Contractor"
         ],
         "summary": "List Contractors the caller's role can manage",
-        "description": "backend-issues #07: read surface for picking an existing agency (create_muayena_placement's contractor_name, Finance's batching/rate lookups).",
+        "description": "backend-issues #07: read surface for picking an existing agency (create_muayena_placement's contractor_name, Finance's batching/rate lookups). Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total.",
         "x-roles": [
           "Manager",
           "Admin",
@@ -4454,7 +4470,23 @@
             "in": "formData",
             "type": "integer",
             "required": false,
-            "default": 100
+            "description": "Page size, clamped to 1-500. Blank/0 = 100."
+          },
+          {
+            "name": "limit_start",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 0,
+            "description": "Offset (rows to skip)."
+          },
+          {
+            "name": "with_total",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "default": false,
+            "description": "If true, the response is {\"data\": [...], \"total_count\": N} instead of a bare list. total_count uses the same filters and permission scope as the rows."
           }
         ],
         "responses": {
@@ -5027,7 +5059,7 @@
           "Placement"
         ],
         "summary": "List Placements the caller's role can read",
-        "description": "backend-issues #02: whitelisted replacement for the raw /api/resource/Placement fallback. Enforces the doctype's own permissions (Manager, Admin, System Manager, Contract Parser, Ticketer, Finance Manager, Clearance Officer, Complaint Manager, Communication Manager, and the six country+step roles).",
+        "description": "backend-issues #02: whitelisted replacement for the raw /api/resource/Placement fallback. Enforces the doctype's own permissions (Manager, Admin, System Manager, Contract Parser, Ticketer, Finance Manager, Clearance Officer, Complaint Manager, Communication Manager, and the six country+step roles). Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total.",
         "x-roles": [
           "Read access to the Placement"
         ],
@@ -5048,7 +5080,7 @@
             "in": "formData",
             "type": "integer",
             "required": false,
-            "default": 100
+            "description": "Page size, clamped to 1-500. Blank/0 = 100."
           },
           {
             "name": "order_by",
@@ -5056,6 +5088,22 @@
             "type": "string",
             "required": false,
             "default": "modified desc"
+          },
+          {
+            "name": "limit_start",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 0,
+            "description": "Offset (rows to skip)."
+          },
+          {
+            "name": "with_total",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "default": false,
+            "description": "If true, the response is {\"data\": [...], \"total_count\": N} instead of a bare list. total_count uses the same filters and permission scope as the rows."
           }
         ],
         "responses": {
@@ -5131,7 +5179,7 @@
           "Portal (Foreign Agency)"
         ],
         "summary": "Browse the candidate catalog",
-        "description": "Standard-track, CV Generated, not yet locked by anyone, matching the agency's own destination country. Non-PII fields only. (2026-09-21: photograph/photo_full_body/experience_video/passport_scan, when stored on R2, are returned as short-lived signed URLs -- 2h expiry -- not permanent links; refetch this endpoint rather than caching/reusing an old URL.) Applicants with an active country ban on their destination_country are excluded. Medical (2026-09-23): medically UNFIT applicants never appear. medical_status is included ONLY when it is \"FIT\"; for any other value (Pending/blank) the key is omitted entirely.",
+        "description": "Standard-track, CV Generated, not yet locked by anyone, matching the agency's own destination country. Non-PII fields only. (2026-09-21: photograph/photo_full_body/experience_video/passport_scan, when stored on R2, are returned as short-lived signed URLs -- 2h expiry -- not permanent links; refetch this endpoint rather than caching/reusing an old URL.) Applicants with an active country ban on their destination_country are excluded. Medical (2026-09-23): medically UNFIT applicants never appear. medical_status is included ONLY when it is \"FIT\"; for any other value (Pending/blank) the key is omitted entirely. Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total.",
         "x-roles": [
           "Foreign Agency"
         ],
@@ -5139,7 +5187,31 @@
           "application/x-www-form-urlencoded",
           "application/json"
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "limit_start",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 0,
+            "description": "Offset (rows to skip)."
+          },
+          {
+            "name": "limit_page_length",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "description": "Page size, clamped to 1-500. Blank/0 = all rows (historical behavior)."
+          },
+          {
+            "name": "with_total",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "default": false,
+            "description": "If true, the response is {\"data\": [...], \"total_count\": N} instead of a bare list. total_count uses the same filters and permission scope as the rows."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -7535,7 +7607,7 @@
           "Complaints"
         ],
         "summary": "List all complaints",
-        "description": "Returns role-scoped list of complaint tickets (scoped to foreign agency tenant if called by Foreign Agency role).",
+        "description": "Returns role-scoped list of complaint tickets (scoped to foreign agency tenant if called by Foreign Agency role). Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total.",
         "x-roles": [
           "Manager",
           "Admin",
@@ -7555,6 +7627,29 @@
             "in": "formData",
             "type": "string",
             "description": "Filter by applicant name"
+          },
+          {
+            "name": "limit_start",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 0,
+            "description": "Offset (rows to skip)."
+          },
+          {
+            "name": "limit_page_length",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "description": "Page size, clamped to 1-500. Blank/0 = all rows (historical behavior)."
+          },
+          {
+            "name": "with_total",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "default": false,
+            "description": "If true, the response is {\"data\": [...], \"total_count\": N} instead of a bare list. total_count uses the same filters and permission scope as the rows."
           }
         ],
         "consumes": [
@@ -7990,7 +8085,7 @@
           "Portal (Foreign Agency)"
         ],
         "summary": "List placements owned by the calling foreign agency",
-        "description": "Returns reserved and active candidate placements belonging to the foreign agency session.",
+        "description": "Returns reserved and active candidate placements belonging to the foreign agency session. Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total.",
         "x-roles": [
           "Foreign Agency",
           "Manager",
@@ -8002,6 +8097,29 @@
             "name": "status",
             "in": "formData",
             "type": "string"
+          },
+          {
+            "name": "limit_start",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 0,
+            "description": "Offset (rows to skip)."
+          },
+          {
+            "name": "limit_page_length",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "description": "Page size, clamped to 1-500. Blank/0 = 100."
+          },
+          {
+            "name": "with_total",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "default": false,
+            "description": "If true, the response is {\"data\": [...], \"total_count\": N} instead of a bare list. total_count uses the same filters and permission scope as the rows."
           }
         ],
         "consumes": [
@@ -8193,7 +8311,7 @@
           "Finance"
         ],
         "summary": "Applicant Transaction history across every status",
-        "description": "Applicant Transaction history across every status (Pending/Approved/Rejected/Voided) -- unlike get_pending_approval_queue (report_api.py), which only ever shows Pending. Surfaces who acted on each row: approved_by/approved_on for Approved, rejection_reason for Rejected, logged_by for who originally created it. from_date/to_date filter on creation date (inclusive).",
+        "description": "Applicant Transaction history across every status (Pending/Approved/Rejected/Voided) -- unlike get_pending_approval_queue (report_api.py), which only ever shows Pending. Surfaces who acted on each row: approved_by/approved_on for Approved, rejection_reason for Rejected, logged_by for who originally created it. from_date/to_date filter on creation date (inclusive). Paging (2026-09-23): limit_start / limit_page_length (max 500) / with_total.",
         "x-roles": [
           "Finance Manager",
           "Admin",
@@ -8266,7 +8384,23 @@
             "in": "formData",
             "type": "integer",
             "required": false,
-            "default": 100
+            "description": "Page size, clamped to 1-500. Blank/0 = 100."
+          },
+          {
+            "name": "limit_start",
+            "in": "formData",
+            "type": "integer",
+            "required": false,
+            "default": 0,
+            "description": "Offset (rows to skip)."
+          },
+          {
+            "name": "with_total",
+            "in": "formData",
+            "type": "boolean",
+            "required": false,
+            "default": false,
+            "description": "If true, the response is {\"data\": [...], \"total_count\": N} instead of a bare list. total_count uses the same filters and permission scope as the rows."
           }
         ],
         "responses": {

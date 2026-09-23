@@ -6,6 +6,7 @@
 import frappe
 from frappe.utils import today
 
+from agency_tracking.pagination import count_rows, page_args, paged_result
 from agency_tracking.roles import INTERNAL_STAFF_ROLES
 from agency_tracking.state_machine import transition
 
@@ -100,7 +101,7 @@ def list_new_complaints():
 
 
 @frappe.whitelist()
-def list_complaints(status=None, **kwargs):
+def list_complaints(status=None, limit_start=0, limit_page_length=0, with_total=0, **kwargs):
 	"""All complaints, optionally filtered by a single status (e.g. "New", "Unresolved",
 	"Resolved"). Oldest-first. Same management-role gate. Convenience over the two status-
 	specific lists for dashboards that want the whole picture or an arbitrary status slice."""
@@ -109,13 +110,18 @@ def list_complaints(status=None, **kwargs):
 		frappe.throw("Not permitted.", frappe.PermissionError)
 	status = status or kwargs.get("complaint_status")
 	filters = {"status": status} if status else {}
-	return frappe.get_list(
+	# default=0: still returns every complaint when no page size is given (its historical behavior).
+	start, length = page_args(limit_start, limit_page_length, default=0)
+	rows = frappe.get_list(
 		"Complaint",
 		filters=filters,
 		fields=["name", "display_no", "placement", "contractor", "raised_by", "worker_status_at_complaint",
 		        "description", "status", "resolution_notes", "resolved_by", "resolved_on", "creation"],
 		order_by="creation asc",
+		limit_start=start,
+		limit_page_length=length,
 	)
+	return paged_result(rows, with_total, lambda: count_rows("Complaint", filters))
 
 
 @frappe.whitelist()

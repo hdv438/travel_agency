@@ -5,6 +5,7 @@
 
 import frappe
 
+from agency_tracking.pagination import count_rows, page_args, paged_result
 from agency_tracking.contract_parser import parse_contract_file, parse_visa_file
 from agency_tracking.state_machine import (
 	assert_placement_not_terminal,
@@ -471,7 +472,7 @@ _PLACEMENT_LIST_APPLICANT_FIELDS = [
 
 
 @frappe.whitelist()
-def list_placements(filters=None, limit_page_length=100, order_by="modified desc"):
+def list_placements(filters=None, limit_page_length=100, order_by="modified desc", limit_start=0, with_total=0):
 	"""backend-issues #02: the whitelisted list surface Placement never had -- callers used to
 	fall back to raw /api/resource/Placement, which only Manager/Admin/System Manager/Contract
 	Parser/Ticketer could read (Placement's doctype-level permissions), 403ing every other role
@@ -490,11 +491,13 @@ def list_placements(filters=None, limit_page_length=100, order_by="modified desc
 	applicant's, so joining it again would just be a same-value overwrite."""
 	if isinstance(filters, str):
 		filters = frappe.parse_json(filters)
+	start, length = page_args(limit_start, limit_page_length)
 	placements = frappe.get_list(
 		"Placement",
 		filters=filters,
 		fields=["*"],
-		limit_page_length=frappe.utils.cint(limit_page_length) or 100,
+		limit_start=start,
+		limit_page_length=length,
 		order_by=order_by,
 	)
 
@@ -513,7 +516,7 @@ def list_placements(filters=None, limit_page_length=100, order_by="modified desc
 		for field in _PLACEMENT_LIST_APPLICANT_FIELDS:
 			p[field] = applicant.get(field) if applicant else None
 
-	return placements
+	return paged_result(placements, with_total, lambda: count_rows("Placement", filters))
 
 
 @frappe.whitelist()

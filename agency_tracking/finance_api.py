@@ -21,6 +21,7 @@ from agency_tracking.finance_engine import (
 	render_batch_invoice_pdf,
 	settle_batch_request,
 )
+from agency_tracking.pagination import count_rows, page_args, paged_result
 from agency_tracking.roles import INTERNAL_STAFF_ROLES
 from agency_tracking.state_machine import log_action, transition
 from decimal import Decimal
@@ -188,6 +189,8 @@ def list_transactions(
 	to_date=None,
 	order_by="creation desc",
 	limit_page_length=100,
+	limit_start=0,
+	with_total=0,
 	**kwargs,
 ):
 	"""Finance Manager/Admin/System Manager. Applicant Transaction history across every status
@@ -213,7 +216,8 @@ def list_transactions(
 		filters["creation"] = [">=", from_date]
 	elif to_date:
 		filters["creation"] = ["<=", to_date]
-	return frappe.get_all(
+	start, length = page_args(limit_start, limit_page_length)
+	rows = frappe.get_all(
 		"Applicant Transaction",
 		filters=filters,
 		fields=[
@@ -223,8 +227,10 @@ def list_transactions(
 			"commission_batch_request", "creation",
 		],
 		order_by=order_by,
-		limit_page_length=limit_page_length,
+		limit_start=start,
+		limit_page_length=length,
 	)
+	return paged_result(rows, with_total, lambda: count_rows("Applicant Transaction", filters, ignore_permissions=True))
 
 
 @frappe.whitelist()
