@@ -373,8 +373,23 @@ def select_candidate(applicant_name=None, free_replacement_for_complaint=None, c
 	# override here -- select_candidate has no Manager-override surface today, unlike
 	# register_applicant/generate_cv/restart_applicant; a blocked selection must go through one
 	# of those (or a future dedicated override param) rather than silently overridable here.
-	from agency_tracking.applicant_api import _check_country_ban_or_throw
-	_check_country_ban_or_throw(applicant_name, applicant.destination_country, False, None)
+	# An agency gets a generic "no longer available" (2026-09-23) -- the ban itself (its existence,
+	# country, ACB id) is an internal decision and must not leak to the foreign agency; internal
+	# staff still get the detailed message. Managers are notified of the attempt either way.
+	from agency_tracking.applicant_api import _check_country_ban_or_throw, _notify_management_of_ban_event
+
+	if _is_internal_placement_reader():
+		_check_country_ban_or_throw(applicant_name, applicant.destination_country, False, None)
+	else:
+		ban = frappe.db.get_value(
+			"Applicant Country Ban",
+			{"applicant": applicant_name, "country": applicant.destination_country, "active": 1},
+			["name", "reason"],
+		)
+		if ban:
+			_notify_management_of_ban_event(applicant_name, applicant.destination_country, ban[0], "blocked", ban[1])
+			frappe.db.commit()  # same reason as in _check_country_ban_or_throw: survive the throw
+			frappe.throw("This candidate is no longer available.", frappe.ValidationError)
 
 	if free_replacement_for_complaint:
 		complaint = frappe.get_doc("Complaint", free_replacement_for_complaint)

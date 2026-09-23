@@ -5172,7 +5172,7 @@
           "Portal (Foreign Agency)"
         ],
         "summary": "Select a candidate (creates a Placement)",
-        "description": "Atomic, globally exclusive -- row-locked so two concurrent selections can't both succeed. free_replacement_for_complaint uses an approved free-replacement credit instead of billing normally. Refused (403) if the applicant has an active country ban on their destination_country (no override on this endpoint).",
+        "description": "Atomic, globally exclusive -- row-locked so two concurrent selections can't both succeed. free_replacement_for_complaint uses an approved free-replacement credit instead of billing normally. Refused if the applicant has an active country ban on their destination_country (no override on this endpoint): a Foreign Agency gets a generic 417 \"This candidate is no longer available.\" with no ban details; internal staff get the detailed 403 ban message. Normally unreachable, since list_portal_candidates never returns a banned applicant; covers a stale portal page or a direct API call.",
         "x-roles": [
           "Foreign Agency (own country's catalog only)"
         ],
