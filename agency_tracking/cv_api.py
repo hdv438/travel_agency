@@ -117,7 +117,7 @@ def _attach_cv_pdf(cv, applicant, pdf_bytes):
 
 
 @frappe.whitelist()
-def generate_cv(applicant_name=None, **kwargs):
+def generate_cv(applicant_name=None, override_ban=False, override_reason=None, **kwargs):
 	"""Part A.2 Stage 3 / Part I Step 2: create + submit a CV Record for a Standard-track
 	Applicant, then move the Applicant to CV Generated. CV Record.validate() enforces the
 	Standard-only/Registered-status rules first (clearer, CV-specific error messages);
@@ -125,6 +125,11 @@ def generate_cv(applicant_name=None, **kwargs):
 	the musaned_status field were both removed 2026-08-29 -- Musaned tracking is gone from
 	this system entirely. Also renders and attaches the actual CV PDF (2026-08-29) --
 	previously this just created a bare record with no document output at all.
+
+	Country-ban check added 2026-09-22: CV Generated is what makes an applicant visible in the
+	foreign-agency portal (portal_api.list_portal_candidates), so this is the load-bearing gate --
+	refusing here covers a first-time applicant and a restarted/re-cycled one alike, since either
+	way they must pass back through here to re-enter the marketplace.
 	"""
 	if not applicant_name:
 		frappe.throw("applicant_name is required.", frappe.ValidationError)
@@ -134,6 +139,9 @@ def generate_cv(applicant_name=None, **kwargs):
 	if applicant.status == "CV Generated":
 		cv_name = frappe.db.get_value("CV Record", {"applicant": applicant_name}, "name") or "CV-RECORD"
 		return {"cv_record": cv_name, "applicant_status": "CV Generated"}
+
+	from agency_tracking.applicant_api import _check_country_ban_or_throw
+	_check_country_ban_or_throw(applicant_name, applicant.destination_country, override_ban, override_reason)
 
 	cv = frappe.get_doc({"doctype": "CV Record", "applicant": applicant_name}).insert()
 

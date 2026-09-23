@@ -7097,6 +7097,83 @@
         ]
       }
     },
+    "/api/method/agency_tracking.finance_api.list_batch_write_offs": {
+      "post": {
+        "tags": [
+          "Finance"
+        ],
+        "summary": "List write-off rows booked against one batch",
+        "description": "Every write-off row booked against one batch (amount, reason, date, linked Expense transaction) -- oldest first, so a \"why is this batch short?\" screen can show the full negotiation history instead of just the summed write_off_total_original. A batch can have several rows (write_off_batch is callable more than once per batch).",
+        "x-roles": [
+          "Finance Manager",
+          "Admin",
+          "System Manager"
+        ],
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "batch_name",
+            "in": "formData",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "amount_original": {
+                        "type": "number"
+                      },
+                      "amount_birr": {
+                        "type": "number"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "transaction": {
+                        "type": "string",
+                        "description": "Linked Expense Applicant Transaction"
+                      },
+                      "write_off_date": {
+                        "type": "string"
+                      },
+                      "idx": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted (role/permission check failed)"
+          },
+          "417": {
+            "description": "Validation error (business rule violated)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/method/agency_tracking.finance_api.release_unpaid_items": {
       "post": {
         "tags": [

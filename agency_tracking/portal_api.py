@@ -212,6 +212,21 @@ def list_portal_candidates(target_job=None, gender=None, **kwargs):
 	if gender:
 		filters["gender"] = gender
 
+	# Country-ban filter (2026-09-22): a banned (applicant, country) pair must never appear in
+	# the marketplace, including for an applicant who was already CV Generated when the ban was
+	# set -- register_applicant/generate_cv only stop a NEW arrival, so this listing needs its
+	# own check to remove someone already inside once a ban lands on them.
+	banned_names = frappe.db.sql_list(
+		"""
+		SELECT acb.applicant
+		FROM `tabApplicant Country Ban` acb
+		INNER JOIN `tabApplicant` a ON a.name = acb.applicant
+		WHERE acb.active = 1 AND acb.country = a.destination_country
+		"""
+	)
+	if banned_names:
+		filters["name"] = ["not in", banned_names]
+
 	rows = frappe.get_list(
 		"Applicant",
 		filters=filters,
@@ -352,6 +367,14 @@ def select_candidate(applicant_name=None, free_replacement_for_complaint=None, c
 		)
 	if applicant.destination_country != contractor.country and frappe.session.user != "Administrator" and not ({"Manager", "Admin", "System Manager"} & set(frappe.get_roles())):
 		frappe.throw("Not permitted.", frappe.PermissionError)
+
+	# Backstop (2026-09-22): list_portal_candidates already excludes a banned applicant, but a
+	# stale/cached portal page could still submit a select for one banned since it rendered. No
+	# override here -- select_candidate has no Manager-override surface today, unlike
+	# register_applicant/generate_cv/restart_applicant; a blocked selection must go through one
+	# of those (or a future dedicated override param) rather than silently overridable here.
+	from agency_tracking.applicant_api import _check_country_ban_or_throw
+	_check_country_ban_or_throw(applicant_name, applicant.destination_country, False, None)
 
 	if free_replacement_for_complaint:
 		complaint = frappe.get_doc("Complaint", free_replacement_for_complaint)
